@@ -1,6 +1,11 @@
 {
   "name": "web-project",
   "version": "0.1.0",
+  "author": {
+    "name": "DevNguyen0111",
+    "url": "https://devnguyen.xyz/",
+    "email": "csgomzgvn@gmail.com"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -14,13 +19,11 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4",
     "typescript": "^5"
   }
 }
