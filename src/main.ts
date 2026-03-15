@@ -24,9 +24,9 @@ async function bootstrap() {
   app.setGlobalPrefix(apiPrefix);
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Web Project Platform API')
+    .setTitle('DN Web Project API')
     .setDescription('Phase 1 endpoints for authentication and users')
-    .setVersion('1.0.0')
+    .setVersion('0.1.0')
     .addBearerAuth()
     .build();
 
