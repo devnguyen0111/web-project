@@ -104,6 +104,7 @@ describe('Auth & Users (e2e)', () => {
     const registerBody = successBody<AuthPayload>(registerRes);
     expect(registerBody.success).toBe(true);
     expect(registerBody.data.user.email).toBe(registerPayload.email);
+    expect(registerBody.data.user.role).toBe(Role.AUTHOR);
     expect(registerBody.data.accessToken).toBeDefined();
     expect(registerBody.data.refreshToken).toBeDefined();
 
@@ -129,7 +130,7 @@ describe('Auth & Users (e2e)', () => {
     expect(meBody.data.email).toBe(registerPayload.email);
 
     const updateRes = await request(server())
-      .patch(`/${apiPrefix}/users/profile`)
+      .patch(`/${apiPrefix}/users/me`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ fullName: 'Updated User' })
       .expect(200);

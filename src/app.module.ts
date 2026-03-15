@@ -14,6 +14,7 @@ import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
+import { BlogModule } from './blog/blog.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { UsersModule } from './users/users.module';
     DatabaseModule,
     UsersModule,
     AuthModule,
+    BlogModule,
   ],
   controllers: [AppController],
   providers: [

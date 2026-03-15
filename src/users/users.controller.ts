@@ -22,6 +22,26 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('me')
+  @ApiOperation({ summary: 'Get my profile' })
+  @ApiResponse({ status: 200, description: 'Profile returned' })
+  async getMe(@CurrentUser('userId') userId: string) {
+    const user = await this.usersService.findByIdOrFail(userId);
+    return this.usersService.toResponse(user);
+  }
+
+  @Patch('me')
+  @ApiOperation({ summary: 'Update my profile' })
+  @ApiBody({ type: UpdateProfileDto })
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  async updateMe(
+    @CurrentUser('userId') userId: string,
+    @Body() payload: UpdateProfileDto,
+  ) {
+    const user = await this.usersService.updateProfile(userId, payload);
+    return this.usersService.toResponse(user);
+  }
+
   @Get('profile')
   @ApiOperation({ summary: 'Get my profile' })
   @ApiResponse({ status: 200, description: 'Profile returned' })
