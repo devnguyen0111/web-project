@@ -323,28 +323,204 @@ Copyright (c) 2026 ...
 
 ## 11) Roadmap
 
-### Phase 1 - Foundation (Q2/2026)
+Implementation is split into 6 phases, designed for fast backend delivery with production-safe milestones.
 
-- Auth, RBAC, blog workflow, digital store baseline, wallet core.
-- Ticket core and basic notifications.
+```mermaid
+gantt
+    title Delivery Plan (6 Phases)
+    dateFormat  YYYY-MM-DD
+    section Core Platform
+    Phase 1 Foundation           :p1, 2026-03-16, 8d
+    Phase 2 Blog System          :p2, after p1, 6d
+    section Economy & Commerce
+    Phase 3 Wallet and Payment   :p3, after p2, 10d
+    Phase 4 Store and Orders     :p4, after p3, 7d
+    section Experience
+    Phase 5 Support and Realtime :p5, after p4, 6d
+    Phase 6 Gamification Polish  :p6, after p5, 8d
+```
 
-### Phase 2 - Growth (Q3/2026)
+### Phase 1 - Foundation (7-8 days)
 
-- Full custom order lifecycle.
-- Leaderboard, badges/achievements, advanced profile.
-- Review/rating and anti-fraud improvements.
+Goal: Run the server successfully with registration/login and baseline CRUD.
 
-### Phase 3 - Monetization (Q4/2026)
+Week 1-2 scope:
 
-- Subscription tiers (VIP perks).
-- Expanded payment features (VNPay, MoMo, Stripe).
-- Advanced seller analytics dashboard.
+- Setup project
+  - NestJS + MongoDB + Redis
+  - Docker Compose (mongo + redis)
+  - Config module (.env)
+  - Swagger setup
+  - Common layers (guards, filters, interceptors, pipes)
+- Auth module
+  - Register + password hashing
+  - Login + JWT access/refresh tokens
+  - Refresh token rotation
+  - Logout (token blacklist)
+  - Basic email verification
+- Users module
+  - User schema
+  - Get/Update profile
+  - Role system (user/staff/admin)
+- Upload module (basic)
+  - Image upload to S3/Cloudinary
 
-### Phase 4 - Ecosystem (Q1/2027)
+Phase 1 outcome: Registration, login, and JWT auth are operational. Swagger docs are available.
 
-- Knowledge base / Wiki.
-- Poll/Vote on blog posts.
-- Public API and partner integrations.
+### Phase 2 - Blog System (5-6 days)
+
+Goal: End-to-end blog publishing flow with moderation and comments.
+
+Week 3 scope:
+
+- Categories
+  - Admin CRUD
+- Posts
+  - Create draft
+  - Update/Delete own post
+  - Submit for review (draft -> pending)
+  - Public listing (published only, pagination)
+  - Get by slug (increment view count)
+  - Like/Bookmark toggle
+  - My posts (all statuses)
+- Moderation
+  - Get pending posts (staff/admin)
+  - Approve -> published
+  - Reject with reason -> rejected
+- Comments
+  - List comments by post
+  - Create comment (nested replies)
+  - Edit/Delete own comment
+  - Like comment
+
+Phase 2 outcome: Fully working blog module with post moderation workflow.
+
+### Phase 3 - Wallet and Payment (8-10 days)
+
+Goal: Production-ready coin economy and real-money top-up flow.
+
+Week 4-5 scope:
+
+- Wallet core
+  - Transaction schema
+  - Get balance
+  - Transaction history (filter + pagination)
+  - Internal atomic transfer logic with MongoDB sessions
+    - purchase() for coin deduction
+    - reward() for coin addition
+    - refund() for coin refund
+  - Admin manual adjust (credit/debit)
+- Payment integration
+  - VNPay provider
+    - Create payment URL
+    - Verify IPN callback
+    - Credit coins after successful verification
+  - MoMo provider (same flow)
+- Blog reward
+  - Auto-credit coin when post is approved
+- Wallet testing (critical)
+  - Concurrent transaction tests
+  - Insufficient balance tests
+  - Payment callback security tests
+
+Phase 3 outcome: Users can top up coins with real money and spend coins safely.
+
+Important note: This is the most critical phase. A small wallet or callback bug can directly cause financial loss.
+
+### Phase 4 - Store and Orders (6-7 days)
+
+Goal: Enable coin-based buying/selling for digital products and custom orders.
+
+Week 5-6 scope:
+
+- Products
+  - Admin CRUD
+  - Digital product upload
+  - Custom order with dynamic fields
+  - Public listing + search + filter
+  - Sale pricing
+- Orders
+  - Create order -> freeze coin -> confirm -> deduct
+  - Digital order: auto-deliver download link after payment
+  - Custom order: admin processing -> upload delivery -> delivered
+  - Buyer confirm completion
+  - Cancel flow
+  - Refund request flow
+  - Status history tracking
+  - Auto-complete cron (7 days)
+- Reviews
+  - Create review (verified purchase only)
+  - Admin reply
+  - Update product rating aggregate
+- Secure file download
+  - Presigned URL (only verified buyers can download)
+
+Phase 4 outcome: Store is fully operational with coin-based purchase and delivery flows.
+
+### Phase 5 - Support and Realtime (5-6 days)
+
+Goal: Deliver support operations and real-time user communication.
+
+Week 7 scope:
+
+- Tickets
+  - Create ticket (optional order link)
+  - Send message + attachment
+  - Staff assignment, internal notes, status transitions
+  - Close/Reopen
+  - Satisfaction rating
+  - Ticket listing + filters
+- Notifications
+  - Notification schema + CRUD
+  - Event-driven creation from:
+    - Post approved/rejected
+    - Order status changed
+    - Ticket reply
+    - Wallet deposit success
+    - New follower
+  - Mark as read / mark all as read
+  - WebSocket gateway for real-time push
+- Mail
+  - Email templates (Handlebars)
+  - Async sending via Bull queue
+  - Verify email, reset password, order confirmation
+
+Phase 5 outcome: Support workflows and real-time notifications are available to end users.
+
+### Phase 6 - Gamification and Polish (6-8 days)
+
+Goal: Improve retention, admin observability, and release readiness.
+
+Week 8-9 scope:
+
+- Gamification
+  - XP system (addXp, level-up checks)
+  - Badge auto-award
+  - Daily missions (progress tracking, reward claim)
+  - Referral system (code, tracking, reward)
+  - Leaderboard
+- Social
+  - Follow/Unfollow
+  - Public profile (posts, badges, level)
+  - User search
+- Admin Dashboard
+  - Overview stats (users, orders, revenue, posts)
+  - Revenue chart data
+  - User management (ban/unban, role changes)
+  - System health
+- Cron Jobs
+  - Auto-complete orders (7 days)
+  - Reset daily missions (00:00)
+  - Cleanup expired tokens
+  - Update leaderboard cache
+- Polish
+  - Rate limiting fine-tuning
+  - Input sanitization review
+  - Error handling review
+  - Complete API documentation
+  - Seed data (admin, categories, badges, missions)
+
+Phase 6 outcome: Feature-complete platform, ready for frontend integration and release hardening.
 
 ---
 
