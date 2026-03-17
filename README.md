@@ -13,6 +13,26 @@ Backend API for authentication, users, and blog workflows (draft, moderation, pu
 This repository is currently a **NestJS backend project**.
 For broader product planning and future modules, see `PROJECT_DOCS.md`.
 
+## Progress Snapshot (Updated: 2026-03-18)
+
+### Completed
+
+- [x] Core app platform: global validation pipe, response interceptor, exception filters, JWT/RBAC guards, Swagger docs.
+- [x] Auth module: register, verify email, login, refresh token rotation, logout, forgot/reset password.
+- [x] Users module: profile read/update, avatar upload to MinIO, admin user list/detail.
+- [x] Blog taxonomy: categories and tags CRUD (public + admin endpoints).
+- [x] Blog posts: draft workflow, block-based content, cover upload, block image upload, submit-for-review flow.
+- [x] Moderation: pending queue, pending detail, approve/reject for `staff`/`admin`.
+- [x] Engagement: comments (create/update/delete/list/hide), likes, bookmarks, poll voting, view counter with short dedupe window.
+- [x] Infra/ops helpers: MongoDB module, MinIO bucket bootstrap, mail template sending with SMTP fallback to log preview.
+- [x] E2E suites in place for auth/users and blog phase-2 workflow (`test/auth-users.e2e-spec.ts`, `test/blog-phase2.e2e-spec.ts`).
+
+### Pending / Next
+
+- [ ] No dedicated endpoint flow to move posts into `archived` state yet (schema supports `archived`).
+- [ ] No backend CI workflow file in this repo yet (`.github/workflows` missing for backend package).
+- [ ] Expand automated tests for edge cases around MinIO failures and mail transport failures.
+
 ## Tech Stack
 
 - Node.js + TypeScript
