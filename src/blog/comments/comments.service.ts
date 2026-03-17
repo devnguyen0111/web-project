@@ -9,6 +9,7 @@ import { Model, Types } from 'mongoose';
 import { Role } from '../../common/constants/roles.constant';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { User } from '../../users/schemas/user.schema';
 import { Post } from '../posts/schemas/post.schema';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
@@ -19,17 +20,44 @@ interface AuthUser {
   role: Role;
 }
 
+type CommentAuthor = {
+  id: string;
+  fullName: string;
+  avatarUrl?: string;
+};
+
+type CommentResponse = {
+  _id: Types.ObjectId;
+  id: string;
+  postId: Types.ObjectId;
+  authorId: Types.ObjectId;
+  content: string;
+  parentId?: Types.ObjectId;
+  depth: number;
+  likes: Types.ObjectId[];
+  likesCount: number;
+  isEdited: boolean;
+  isDeleted: boolean;
+  isHidden: boolean;
+  hiddenBy?: Types.ObjectId;
+  hideReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  author: CommentAuthor | null;
+};
+
 @Injectable()
 export class CommentsService {
   constructor(
     @InjectModel(Comment.name) private readonly commentModel: Model<Comment>,
     @InjectModel(Post.name) private readonly postModel: Model<Post>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
 
   async listByPost(
     postId: string,
     query: PaginationDto,
-  ): Promise<PaginatedResponseDto<CommentDocument>> {
+  ): Promise<PaginatedResponseDto<CommentResponse>> {
     const skip = (query.page - 1) * query.limit;
     const filter = {
       postId: new Types.ObjectId(postId),
@@ -47,8 +75,11 @@ export class CommentsService {
       this.commentModel.countDocuments(filter),
     ]);
 
+    const comments = data as CommentDocument[];
+    const enrichedComments = await this.enrichCommentsWithAuthor(comments);
+
     return new PaginatedResponseDto(
-      data as CommentDocument[],
+      enrichedComments,
       total,
       query.page,
       query.limit,
@@ -59,7 +90,7 @@ export class CommentsService {
     postId: string,
     userId: string,
     payload: CreateCommentDto,
-  ): Promise<CommentDocument> {
+  ): Promise<CommentResponse> {
     const postExists = await this.postModel.exists({ _id: postId });
     if (!postExists) {
       throw new NotFoundException('Post not found');
@@ -95,14 +126,14 @@ export class CommentsService {
       { $inc: { commentsCount: 1 } },
     );
 
-    return comment;
+    return this.enrichCommentWithAuthor(comment);
   }
 
   async update(
     commentId: string,
     userId: string,
     payload: UpdateCommentDto,
-  ): Promise<CommentDocument> {
+  ): Promise<CommentResponse> {
     const comment = await this.commentModel.findById(commentId).exec();
     if (!comment || comment.isDeleted) {
       throw new NotFoundException('Comment not found');
@@ -116,7 +147,7 @@ export class CommentsService {
     comment.isEdited = true;
     await comment.save();
 
-    return comment;
+    return this.enrichCommentWithAuthor(comment);
   }
 
   async remove(
@@ -182,7 +213,7 @@ export class CommentsService {
     commentId: string,
     user: AuthUser,
     reason?: string,
-  ): Promise<CommentDocument> {
+  ): Promise<CommentResponse> {
     if (![Role.STAFF, Role.ADMIN].includes(user.role)) {
       throw new ForbiddenException('Only staff/admin can hide comments');
     }
@@ -197,6 +228,64 @@ export class CommentsService {
     comment.hideReason = reason;
 
     await comment.save();
-    return comment;
+    return this.enrichCommentWithAuthor(comment);
+  }
+
+  private async enrichCommentsWithAuthor(
+    comments: CommentDocument[],
+  ): Promise<CommentResponse[]> {
+    if (comments.length === 0) {
+      return [];
+    }
+
+    const authorIds = [
+      ...new Set(comments.map((comment) => comment.authorId.toString())),
+    ];
+
+    const authors = await this.userModel
+      .find({ _id: { $in: authorIds } })
+      .select('fullName avatarUrl')
+      .lean();
+
+    const authorMap = new Map<string, CommentAuthor>(
+      authors.map((author) => [
+        author._id.toString(),
+        {
+          id: author._id.toString(),
+          fullName: author.fullName,
+          avatarUrl: author.avatarUrl,
+        },
+      ]),
+    );
+
+    return comments.map((comment) => {
+      const normalizedComment =
+        typeof (comment as { toObject?: () => object }).toObject === 'function'
+          ? ((comment as { toObject: () => object }).toObject() as Omit<
+              CommentResponse,
+              'author'
+            >)
+          : (comment as unknown as Omit<CommentResponse, 'author'>);
+
+      const author = authorMap.get(comment.authorId.toString());
+      return {
+        ...normalizedComment,
+        id: normalizedComment._id.toString(),
+        author: author
+          ? author
+          : {
+              id: comment.authorId.toString(),
+              fullName: '[Ẩn danh]',
+              avatarUrl: undefined,
+            },
+      };
+    });
+  }
+
+  private async enrichCommentWithAuthor(
+    comment: CommentDocument,
+  ): Promise<CommentResponse> {
+    const [enrichedComment] = await this.enrichCommentsWithAuthor([comment]);
+    return enrichedComment;
   }
 }

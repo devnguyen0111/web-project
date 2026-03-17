@@ -1,18 +1,31 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpStatus,
+  Param,
+  Patch,
+  Query,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '../common/constants/roles.constant';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
+import { ParseFilePipeBuilder } from '@nestjs/common';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 
@@ -39,6 +52,45 @@ export class UsersController {
     @Body() payload: UpdateProfileDto,
   ) {
     const user = await this.usersService.updateProfile(userId, payload);
+    return this.usersService.toResponse(user);
+  }
+
+  @Patch('me/avatar')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload my avatar' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Avatar updated' })
+  async uploadMyAvatar(
+    @CurrentUser('userId') userId: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/i })
+        .addMaxSizeValidator({ maxSize: 5 * 1024 * 1024 })
+        .build({
+          fileIsRequired: true,
+          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        }),
+    )
+    file: {
+      buffer: Buffer;
+      size: number;
+      mimetype?: string;
+      originalname?: string;
+    },
+  ) {
+    const user = await this.usersService.uploadAvatar(userId, file);
     return this.usersService.toResponse(user);
   }
 

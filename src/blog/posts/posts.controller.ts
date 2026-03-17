@@ -1,26 +1,34 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Body,
   Controller,
   Delete,
   Get,
+  HttpStatus,
   Param,
   Patch,
   Post as HttpPost,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AUTHOR_PLUS_ROLES, Role } from '../../common/constants/roles.constant';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ParseObjectIdPipe } from '../../common/pipes/parse-objectid.pipe';
+import { ParseFilePipeBuilder } from '@nestjs/common';
 import { CreatePostDto } from './dto/create-post.dto';
 import { PostsQueryDto } from './dto/posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -67,6 +75,47 @@ export class PostsController {
     @Body() payload: CreatePostDto,
   ) {
     return this.postsService.createDraft(userId, payload);
+  }
+
+  @ApiBearerAuth()
+  @Roles(...AUTHOR_PLUS_ROLES)
+  @HttpPost(':id/cover-image')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload post cover image' })
+  @ApiParam({ name: 'id' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  uploadCoverImage(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/i })
+        .addMaxSizeValidator({ maxSize: 8 * 1024 * 1024 })
+        .build({
+          fileIsRequired: true,
+          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        }),
+    )
+    file: {
+      buffer: Buffer;
+      size: number;
+      mimetype?: string;
+      originalname?: string;
+    },
+  ) {
+    return this.postsService.uploadCoverImage(id, user, file);
   }
 
   @ApiBearerAuth()

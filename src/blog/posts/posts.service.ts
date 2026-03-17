@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   ForbiddenException,
@@ -9,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import { Role } from '../../common/constants/roles.constant';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { toSlug } from '../../common/utils/slug.util';
+import { MinioService } from '../../minio/minio.service';
 import { Category } from '../categories/schemas/category.schema';
 import { Tag } from '../tags/schemas/tag.schema';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -29,6 +31,7 @@ export class PostsService {
     @InjectModel(PollVote.name) private readonly pollVoteModel: Model<PollVote>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(Tag.name) private readonly tagModel: Model<Tag>,
+    private readonly minioService: MinioService,
   ) {}
 
   async createDraft(
@@ -156,6 +159,57 @@ export class PostsService {
     }
 
     await post.save();
+    return post;
+  }
+
+  async uploadCoverImage(
+    postId: string,
+    user: AuthUser,
+    file: {
+      buffer: Buffer;
+      size: number;
+      mimetype?: string;
+      originalname?: string;
+    },
+  ): Promise<PostDocument> {
+    const post = await this.postModel.findById(postId).exec();
+    if (!post) {
+      throw new NotFoundException('Post not found');
+    }
+
+    this.ensureOwnership(post, user);
+
+    if (post.status === PostStatus.PUBLISHED && !this.isModerator(user.role)) {
+      throw new BadRequestException(
+        'Published posts can only be edited by staff/admin',
+      );
+    }
+
+    const oldCoverImageUrl = post.coverImageUrl;
+    const blogImagesBucket = this.minioService.getBucket('blogImages');
+
+    const upload = await this.minioService.uploadFile(
+      blogImagesBucket,
+      file,
+      `posts/${post.id}`,
+    );
+
+    post.coverImageUrl = upload.url;
+
+    if (post.status === PostStatus.REJECTED) {
+      post.status = PostStatus.DRAFT;
+      post.rejectionReason = undefined;
+    }
+
+    await post.save();
+
+    if (oldCoverImageUrl && oldCoverImageUrl !== upload.url) {
+      await this.minioService.removeObjectByUrl(
+        blogImagesBucket,
+        oldCoverImageUrl,
+      );
+    }
+
     return post;
   }
 

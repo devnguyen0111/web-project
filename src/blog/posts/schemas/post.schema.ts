@@ -50,6 +50,9 @@ export class Post {
   @Prop({ trim: true })
   excerpt?: string;
 
+  @Prop({ trim: true })
+  coverImageUrl?: string;
+
   @Prop({ required: true })
   content: string;
 

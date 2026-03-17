@@ -5,6 +5,7 @@ import { Model } from 'mongoose';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { Role } from '../common/constants/roles.constant';
+import { MinioService } from '../minio/minio.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { User, UserDocument } from './schemas/user.schema';
@@ -20,6 +21,7 @@ interface CreateUserInput {
 export class UsersService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly minioService: MinioService,
   ) {}
 
   async create(input: CreateUserInput): Promise<UserDocument> {
@@ -74,6 +76,35 @@ export class UsersService {
 
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  async uploadAvatar(
+    userId: string,
+    file: {
+      buffer: Buffer;
+      size: number;
+      mimetype?: string;
+      originalname?: string;
+    },
+  ): Promise<UserDocument> {
+    const user = await this.findByIdOrFail(userId);
+    const oldAvatarUrl = user.avatarUrl;
+    const avatarBucket = this.minioService.getBucket('avatars');
+
+    const upload = await this.minioService.uploadFile(
+      avatarBucket,
+      file,
+      `users/${userId}`,
+    );
+
+    user.avatarUrl = upload.url;
+    await user.save();
+
+    if (oldAvatarUrl && oldAvatarUrl !== upload.url) {
+      await this.minioService.removeObjectByUrl(avatarBucket, oldAvatarUrl);
     }
 
     return user;
