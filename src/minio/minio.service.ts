@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Client } from 'minio';
@@ -23,20 +22,26 @@ export class MinioService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    const shouldInitBuckets =
+      this.configService.get<boolean>('minio.initBuckets') ?? true;
+
+    if (!shouldInitBuckets) {
+      this.logger.log(
+        'Skipping bucket initialization because S3_INIT_BUCKETS=false.',
+      );
+      return;
+    }
+
+    if (!this.hasStorageCredentials()) {
+      this.logger.warn(
+        'Skipping bucket initialization because S3_ACCESS_KEY or S3_SECRET_KEY is missing.',
+      );
+      return;
+    }
+
     const buckets = this.getConfiguredBuckets();
 
-    await Promise.all(
-      buckets.map(async (bucket) => {
-        const exists = await this.minioClient.bucketExists(bucket);
-        if (!exists) {
-          await this.minioClient.makeBucket(
-            bucket,
-            this.configService.get<string>('minio.region') ?? 'us-east-1',
-          );
-          this.logger.log(`Created bucket: ${bucket}`);
-        }
-      }),
-    );
+    await Promise.all(buckets.map((bucket) => this.ensureBucketExists(bucket)));
   }
 
   async uploadFile(
@@ -87,8 +92,10 @@ export class MinioService implements OnModuleInit {
     try {
       await this.removeObject(bucketName, objectName);
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'unknown error';
       this.logger.warn(
-        `Could not remove object "${objectName}" from bucket "${bucketName}".`,
+        `Could not remove object "${objectName}" from bucket "${bucketName}". Error: ${errorMessage}`,
       );
     }
   }
@@ -113,6 +120,42 @@ export class MinioService implements OnModuleInit {
     bucketKey: keyof ReturnType<MinioService['getBucketsMap']>,
   ): string {
     return this.getBucketsMap()[bucketKey];
+  }
+
+  private hasStorageCredentials(): boolean {
+    const accessKey =
+      this.configService.get<string>('minio.accessKey')?.trim() ?? '';
+    const secretKey =
+      this.configService.get<string>('minio.secretKey')?.trim() ?? '';
+    const looksLikePlaceholder = (value: string) => /^<.+>$/.test(value);
+
+    return (
+      accessKey.length > 0 &&
+      secretKey.length > 0 &&
+      !looksLikePlaceholder(accessKey) &&
+      !looksLikePlaceholder(secretKey)
+    );
+  }
+
+  private async ensureBucketExists(bucket: string): Promise<void> {
+    try {
+      const exists = await this.minioClient.bucketExists(bucket);
+      if (exists) {
+        return;
+      }
+
+      await this.minioClient.makeBucket(
+        bucket,
+        this.configService.get<string>('minio.region') ?? 'us-east-1',
+      );
+      this.logger.log(`Created bucket: ${bucket}`);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(
+        `Could not ensure bucket "${bucket}". Continuing startup. Error: ${errorMessage}`,
+      );
+    }
   }
 
   private getConfiguredBuckets(): string[] {

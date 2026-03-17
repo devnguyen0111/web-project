@@ -36,6 +36,7 @@ export default registerAs('minio', () => {
     endpoint,
     port: Number(process.env.S3_PORT ?? inferredPort ?? fallbackPort),
     useSSL,
+    initBuckets: parseBoolean(process.env.S3_INIT_BUCKETS, true),
     accessKey: process.env.S3_ACCESS_KEY ?? '',
     secretKey: process.env.S3_SECRET_KEY ?? '',
     region: process.env.S3_REGION ?? 'us-east-1',
