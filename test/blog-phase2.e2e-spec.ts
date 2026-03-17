@@ -89,7 +89,22 @@ describe('Blog Phase 2 (e2e)', () => {
       })
       .expect(201);
 
-    await userModel.updateOne({ email: adminEmail }, { role: Role.ADMIN });
+    await userModel.updateOne(
+      { email: authorEmail },
+      {
+        isEmailVerified: true,
+        emailVerificationCodeHash: null,
+      },
+    );
+
+    await userModel.updateOne(
+      { email: adminEmail },
+      {
+        role: Role.ADMIN,
+        isEmailVerified: true,
+        emailVerificationCodeHash: null,
+      },
+    );
 
     const authorLogin = await request(server())
       .post(`/${apiPrefix}/auth/login`)
@@ -125,12 +140,37 @@ describe('Blog Phase 2 (e2e)', () => {
 
     const tagId = (tagRes.body as ApiSuccess<{ _id: string }>).data._id;
 
+    await request(server())
+      .post(`/${apiPrefix}/posts`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .send({
+        title: 'Expired poll post',
+        blocks: [
+          {
+            type: 'paragraph',
+            text: 'This post should fail because poll ended in the past',
+          },
+        ],
+        poll: {
+          question: 'Expired poll?',
+          options: [{ text: 'Yes' }, { text: 'No' }],
+          isPermanent: false,
+          endsAt: new Date(Date.now() - 60_000).toISOString(),
+        },
+      })
+      .expect(400);
+
     const createPostRes = await request(server())
       .post(`/${apiPrefix}/posts`)
       .set('Authorization', `Bearer ${authorToken}`)
       .send({
         title: 'Phase 2 Post',
-        content: 'This is a test post for phase 2 blog flow',
+        blocks: [
+          {
+            type: 'paragraph',
+            text: 'This is a test post for phase 2 blog flow',
+          },
+        ],
         categoryId,
         tagIds: [tagId],
         poll: {
@@ -148,6 +188,17 @@ describe('Blog Phase 2 (e2e)', () => {
       .post(`/${apiPrefix}/posts/${createdPost._id}/submit`)
       .set('Authorization', `Bearer ${authorToken}`)
       .expect(201);
+
+    await request(server())
+      .get(`/${apiPrefix}/moderation/posts/${createdPost._id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200)
+      .expect((res) => {
+        const data = (res.body as ApiSuccess<{ _id: string; status: string }>)
+          .data;
+        expect(data._id).toBe(createdPost._id);
+        expect(data.status).toBe('pending');
+      });
 
     await request(server())
       .get(`/${apiPrefix}/moderation/posts?page=1&limit=10`)
@@ -171,6 +222,42 @@ describe('Blog Phase 2 (e2e)', () => {
         const data = (res.body as ApiSuccess<{ data: Array<{ _id: string }> }>)
           .data.data;
         expect(data.some((item) => item._id === createdPost._id)).toBe(true);
+      });
+
+    await request(server())
+      .get(`/${apiPrefix}/posts/${createdPost._id}/like-status`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .expect(200)
+      .expect((res) => {
+        const payload = (
+          res.body as ApiSuccess<{ liked: boolean; likesCount: number }>
+        ).data;
+        expect(payload.liked).toBe(false);
+        expect(payload.likesCount).toBe(0);
+      });
+
+    await request(server())
+      .post(`/${apiPrefix}/posts/${createdPost._id}/like`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .expect(201)
+      .expect((res) => {
+        const payload = (
+          res.body as ApiSuccess<{ liked: boolean; likesCount: number }>
+        ).data;
+        expect(payload.liked).toBe(true);
+        expect(payload.likesCount).toBe(1);
+      });
+
+    await request(server())
+      .post(`/${apiPrefix}/posts/${createdPost._id}/like`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .expect(201)
+      .expect((res) => {
+        const payload = (
+          res.body as ApiSuccess<{ liked: boolean; likesCount: number }>
+        ).data;
+        expect(payload.liked).toBe(false);
+        expect(payload.likesCount).toBe(0);
       });
 
     await request(server())
@@ -198,6 +285,69 @@ describe('Blog Phase 2 (e2e)', () => {
 
     await request(server())
       .get(`/${apiPrefix}/posts/${createdPost.slug}`)
-      .expect(200);
-  });
+      .set('purpose', 'prefetch')
+      .expect(200)
+      .expect((res) => {
+        const post = (res.body as ApiSuccess<{ views: number }>).data;
+        expect(post.views).toBe(0);
+      });
+
+    await request(server())
+      .get(`/${apiPrefix}/posts/${createdPost.slug}`)
+      .expect(200)
+      .expect((res) => {
+        const post = (res.body as ApiSuccess<{ views: number }>).data;
+        expect(post.views).toBe(1);
+      });
+
+    await request(server())
+      .get(`/${apiPrefix}/posts/${createdPost.slug}`)
+      .expect(200)
+      .expect((res) => {
+        const post = (res.body as ApiSuccess<{ views: number }>).data;
+        expect(post.views).toBe(1);
+      });
+
+    await request(server())
+      .patch(`/${apiPrefix}/posts/${createdPost._id}`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .send({ excerpt: 'Edited by author after publish' })
+      .expect(200)
+      .expect((res) => {
+        const payload = (
+          res.body as ApiSuccess<{
+            status: string;
+            author: { fullName: string };
+          }>
+        ).data;
+        expect(payload.status).toBe('pending');
+        expect(payload.author.fullName).toBe('Author Phase 2');
+      });
+
+    await request(server())
+      .get(`/${apiPrefix}/posts`)
+      .expect(200)
+      .expect((res) => {
+        const data = (res.body as ApiSuccess<{ data: Array<{ _id: string }> }>)
+          .data.data;
+        expect(data.some((item) => item._id === createdPost._id)).toBe(false);
+      });
+
+    await request(server())
+      .get(`/${apiPrefix}/posts/me/${createdPost._id}`)
+      .set('Authorization', `Bearer ${authorToken}`)
+      .expect(200)
+      .expect((res) => {
+        const payload = (
+          res.body as ApiSuccess<{
+            _id: string;
+            status: string;
+            author: { fullName: string };
+          }>
+        ).data;
+        expect(payload._id).toBe(createdPost._id);
+        expect(payload.status).toBe('pending');
+        expect(payload.author.fullName).toBe('Author Phase 2');
+      });
+  }, 30000);
 });

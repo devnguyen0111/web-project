@@ -1,15 +1,15 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Body,
   Controller,
   Delete,
   Get,
+  Headers,
   HttpStatus,
   Param,
   Patch,
   Post as HttpPost,
   Query,
+  Req,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -34,6 +34,7 @@ import { PostsQueryDto } from './dto/posts-query.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { VotePollDto } from './dto/vote-poll.dto';
 import { PostsService } from './posts.service';
+import type { Request } from 'express';
 
 interface AuthUser {
   userId: string;
@@ -63,6 +64,18 @@ export class PostsController {
   @ApiOperation({ summary: 'List my posts' })
   listMine(@CurrentUser() user: AuthUser, @Query() query: PostsQueryDto) {
     return this.postsService.listMyPosts(user.userId, query);
+  }
+
+  @ApiBearerAuth()
+  @Roles(...AUTHOR_PLUS_ROLES)
+  @Get('me/:id')
+  @ApiOperation({ summary: 'Get my post detail by id' })
+  @ApiParam({ name: 'id' })
+  findMineById(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.postsService.findMyPostById(id, user);
   }
 
   @ApiBearerAuth()
@@ -120,6 +133,45 @@ export class PostsController {
 
   @ApiBearerAuth()
   @Roles(...AUTHOR_PLUS_ROLES)
+  @HttpPost('block-image')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload image for post block editor' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  uploadBlockImage(
+    @CurrentUser('userId') userId: string,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/i })
+        .addMaxSizeValidator({ maxSize: 8 * 1024 * 1024 })
+        .build({
+          fileIsRequired: true,
+          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        }),
+    )
+    file: {
+      buffer: Buffer;
+      size: number;
+      mimetype?: string;
+      originalname?: string;
+    },
+  ) {
+    return this.postsService.uploadBlockImage(userId, file);
+  }
+
+  @ApiBearerAuth()
+  @Roles(...AUTHOR_PLUS_ROLES)
   @Patch(':id')
   @ApiOperation({ summary: 'Update own post draft' })
   @ApiParam({ name: 'id' })
@@ -135,7 +187,9 @@ export class PostsController {
   @ApiBearerAuth()
   @Roles(...AUTHOR_PLUS_ROLES)
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete own post' })
+  @ApiOperation({
+    summary: 'Delete post (author own, staff published, admin any)',
+  })
   @ApiParam({ name: 'id' })
   remove(
     @Param('id', ParseObjectIdPipe) id: string,
@@ -166,6 +220,18 @@ export class PostsController {
     @CurrentUser('userId') userId: string,
   ) {
     return this.postsService.toggleLike(id, userId);
+  }
+
+  @ApiBearerAuth()
+  @Roles(...AUTHOR_PLUS_ROLES)
+  @Get(':id/like-status')
+  @ApiOperation({ summary: 'Get my like status on a published post' })
+  @ApiParam({ name: 'id' })
+  likeStatus(
+    @Param('id', ParseObjectIdPipe) id: string,
+    @CurrentUser('userId') userId: string,
+  ) {
+    return this.postsService.getLikeStatus(id, userId);
   }
 
   @ApiBearerAuth()
@@ -206,7 +272,56 @@ export class PostsController {
   @Get(':slug')
   @ApiOperation({ summary: 'Get published post by slug' })
   @ApiParam({ name: 'slug' })
-  findBySlug(@Param('slug') slug: string) {
-    return this.postsService.findPublishedBySlug(slug);
+  @ApiQuery({
+    name: 'trackView',
+    required: false,
+    description: 'Set false to skip view increment',
+  })
+  findBySlug(
+    @Param('slug') slug: string,
+    @Query('trackView') trackView?: string,
+    @Headers('purpose') purpose?: string,
+    @Headers('next-router-prefetch') nextRouterPrefetch?: string,
+    @Req() request?: Request,
+  ) {
+    const isPrefetchRequest =
+      purpose?.toLowerCase() === 'prefetch' || nextRouterPrefetch !== undefined;
+
+    const shouldTrackView =
+      trackView !== undefined
+        ? trackView.toLowerCase() !== 'false'
+        : !isPrefetchRequest;
+
+    return this.postsService.findPublishedBySlug(slug, {
+      shouldIncrementView: shouldTrackView,
+      viewerFingerprint: this.buildViewerFingerprint(request),
+    });
+  }
+
+  private buildViewerFingerprint(request?: Request): string | undefined {
+    if (!request) {
+      return undefined;
+    }
+
+    const headers = request.headers as Record<
+      string,
+      string | string[] | undefined
+    >;
+    const forwardedFor = headers['x-forwarded-for'];
+    const forwardedIp = Array.isArray(forwardedFor)
+      ? forwardedFor[0]
+      : forwardedFor?.split(',')[0]?.trim();
+
+    const ip =
+      forwardedIp ||
+      request.ip ||
+      request.socket?.remoteAddress ||
+      'unknown-ip';
+    const userAgent = headers['user-agent'];
+    const normalizedUserAgent = Array.isArray(userAgent)
+      ? userAgent[0]
+      : userAgent || 'unknown-user-agent';
+
+    return `${ip}:${normalizedUserAgent}`;
   }
 }

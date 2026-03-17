@@ -11,6 +11,67 @@ export enum PostStatus {
   ARCHIVED = 'archived',
 }
 
+export enum PostBlockType {
+  PARAGRAPH = 'paragraph',
+  HEADING = 'heading',
+  QUOTE = 'quote',
+  LIST = 'list',
+  IMAGE = 'image',
+  CODE = 'code',
+}
+
+export enum PostListStyle {
+  ORDERED = 'ordered',
+  UNORDERED = 'unordered',
+}
+
+export enum PostImageSize {
+  SMALL = 'small',
+  MEDIUM = 'medium',
+  LARGE = 'large',
+}
+
+@Schema({ _id: false })
+export class PostBlock {
+  @Prop({ required: true, enum: PostBlockType })
+  type: PostBlockType;
+
+  @Prop({ trim: true })
+  id?: string;
+
+  @Prop({ trim: true })
+  text?: string;
+
+  @Prop({ min: 1, max: 4 })
+  level?: number;
+
+  @Prop({ type: [String], default: undefined })
+  items?: string[];
+
+  @Prop({ enum: PostListStyle })
+  style?: PostListStyle;
+
+  @Prop({ trim: true })
+  url?: string;
+
+  @Prop({ trim: true })
+  alt?: string;
+
+  @Prop({ trim: true })
+  caption?: string;
+
+  @Prop({ enum: PostImageSize })
+  size?: PostImageSize;
+
+  @Prop()
+  code?: string;
+
+  @Prop({ trim: true })
+  language?: string;
+}
+
+export const PostBlockSchema = SchemaFactory.createForClass(PostBlock);
+
 @Schema({ _id: false })
 export class PollOption {
   @Prop({ required: true, trim: true })
@@ -32,6 +93,12 @@ export class Poll {
 
   @Prop({ default: 0 })
   totalVotes: number;
+
+  @Prop({ default: true })
+  isPermanent: boolean;
+
+  @Prop()
+  endsAt?: Date;
 }
 
 export const PollSchema = SchemaFactory.createForClass(Poll);
@@ -53,8 +120,14 @@ export class Post {
   @Prop({ trim: true })
   coverImageUrl?: string;
 
-  @Prop({ required: true })
-  content: string;
+  @Prop({ type: [PostBlockSchema], default: [] })
+  blocks: PostBlock[];
+
+  @Prop({ default: '' })
+  searchText: string;
+
+  @Prop({ trim: true })
+  content?: string;
 
   @Prop({ type: Types.ObjectId })
   categoryId?: Types.ObjectId;
@@ -111,4 +184,4 @@ PostSchema.index({ authorId: 1, status: 1 });
 PostSchema.index({ status: 1, publishedAt: -1 });
 PostSchema.index({ categoryId: 1, status: 1 });
 PostSchema.index({ tags: 1 });
-PostSchema.index({ title: 'text', content: 'text' });
+PostSchema.index({ title: 'text', searchText: 'text' });

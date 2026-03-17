@@ -10,6 +10,10 @@ export class ModerationService {
     return this.postsService.listPending(query);
   }
 
+  findPendingById(postId: string) {
+    return this.postsService.findPendingById(postId);
+  }
+
   approve(postId: string, reviewerId: string) {
     return this.postsService.approve(postId, reviewerId);
   }

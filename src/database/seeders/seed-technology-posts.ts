@@ -83,6 +83,7 @@ async function getOrCreateAuthorId(): Promise<Types.ObjectId> {
     email: 'tech.seeder@example.com',
     password,
     role: 'author',
+    isEmailVerified: true,
     createdAt: now,
     updatedAt: now,
   });
@@ -156,6 +157,13 @@ async function seedTechnologyPosts(): Promise<void> {
             title: post.title,
             slug,
             excerpt: post.excerpt,
+            blocks: [
+              {
+                type: 'paragraph',
+                text: post.content,
+              },
+            ],
+            searchText: post.content,
             content: post.content,
             categoryId,
             tags: [],

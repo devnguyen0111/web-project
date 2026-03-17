@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
+import { createHash } from 'crypto';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Model } from 'mongoose';
 import request from 'supertest';
@@ -19,6 +20,7 @@ interface AuthUser {
   fullName: string;
   email: string;
   role: Role;
+  isEmailVerified: boolean;
   avatarUrl?: string;
   createdAt: string;
   updatedAt: string;
@@ -28,6 +30,12 @@ interface AuthPayload {
   user: AuthUser;
   accessToken: string;
   refreshToken: string;
+}
+
+interface RegisterPayload {
+  message: string;
+  requiresEmailVerification: boolean;
+  user: AuthUser;
 }
 
 interface PaginatedUsersPayload {
@@ -48,6 +56,10 @@ describe('Auth & Users (e2e)', () => {
 
   const successBody = <T>(res: request.Response): ApiSuccess<T> => {
     return res.body as ApiSuccess<T>;
+  };
+
+  const hashCode = (code: string) => {
+    return createHash('sha256').update(code).digest('hex');
   };
 
   beforeAll(async () => {
@@ -89,7 +101,7 @@ describe('Auth & Users (e2e)', () => {
     await mongoServer.stop();
   });
 
-  it('register -> login -> me -> update profile -> refresh -> logout', async () => {
+  it('register -> verify email -> login -> profile -> forgot/reset password -> refresh -> logout', async () => {
     const registerPayload = {
       fullName: 'Test User',
       email: 'user1@example.com',
@@ -101,12 +113,43 @@ describe('Auth & Users (e2e)', () => {
       .send(registerPayload)
       .expect(201);
 
-    const registerBody = successBody<AuthPayload>(registerRes);
+    const registerBody = successBody<RegisterPayload>(registerRes);
     expect(registerBody.success).toBe(true);
     expect(registerBody.data.user.email).toBe(registerPayload.email);
     expect(registerBody.data.user.role).toBe(Role.AUTHOR);
-    expect(registerBody.data.accessToken).toBeDefined();
-    expect(registerBody.data.refreshToken).toBeDefined();
+    expect(registerBody.data.user.isEmailVerified).toBe(false);
+    expect(registerBody.data.requiresEmailVerification).toBe(true);
+
+    await request(server())
+      .post(`/${apiPrefix}/auth/login`)
+      .send({
+        email: registerPayload.email,
+        password: registerPayload.password,
+      })
+      .expect(403);
+
+    const verificationCode = '123456';
+    await userModel.updateOne(
+      { email: registerPayload.email },
+      {
+        emailVerificationCodeHash: hashCode(verificationCode),
+        emailVerificationCodeExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
+    );
+
+    const verifyRes = await request(server())
+      .post(`/${apiPrefix}/auth/verify-email`)
+      .send({
+        email: registerPayload.email,
+        code: verificationCode,
+      })
+      .expect(201);
+
+    const verifyBody = successBody<{ message: string; user: AuthUser }>(
+      verifyRes,
+    );
+    expect(verifyBody.success).toBe(true);
+    expect(verifyBody.data.user.isEmailVerified).toBe(true);
 
     const loginRes = await request(server())
       .post(`/${apiPrefix}/auth/login`)
@@ -138,9 +181,52 @@ describe('Auth & Users (e2e)', () => {
     const updateBody = successBody<AuthUser>(updateRes);
     expect(updateBody.data.fullName).toBe('Updated User');
 
+    await request(server())
+      .post(`/${apiPrefix}/auth/forgot-password`)
+      .send({ email: registerPayload.email })
+      .expect(201);
+
+    const resetCode = '654321';
+    const newPassword = 'newPassword123';
+
+    await userModel.updateOne(
+      { email: registerPayload.email },
+      {
+        passwordResetCodeHash: hashCode(resetCode),
+        passwordResetCodeExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
+    );
+
+    await request(server())
+      .post(`/${apiPrefix}/auth/reset-password`)
+      .send({
+        email: registerPayload.email,
+        code: resetCode,
+        newPassword,
+      })
+      .expect(201);
+
+    await request(server())
+      .post(`/${apiPrefix}/auth/login`)
+      .send({
+        email: registerPayload.email,
+        password: registerPayload.password,
+      })
+      .expect(401);
+
+    const loginWithNewPassword = await request(server())
+      .post(`/${apiPrefix}/auth/login`)
+      .send({
+        email: registerPayload.email,
+        password: newPassword,
+      })
+      .expect(201);
+
+    const newTokens = successBody<AuthPayload>(loginWithNewPassword).data;
+
     const refreshRes = await request(server())
       .post(`/${apiPrefix}/auth/refresh`)
-      .send({ refreshToken })
+      .send({ refreshToken: newTokens.refreshToken })
       .expect(201);
 
     const refreshBody = successBody<AuthPayload>(refreshRes);
@@ -150,8 +236,13 @@ describe('Auth & Users (e2e)', () => {
 
     await request(server())
       .post(`/${apiPrefix}/auth/logout`)
-      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Authorization', `Bearer ${newTokens.accessToken}`)
       .expect(201);
+
+    await request(server())
+      .post(`/${apiPrefix}/auth/refresh`)
+      .send({ refreshToken: newTokens.refreshToken })
+      .expect(401);
 
     await request(server())
       .post(`/${apiPrefix}/auth/refresh`)
@@ -174,7 +265,19 @@ describe('Auth & Users (e2e)', () => {
       .send({ fullName: 'Admin User', email: adminEmail, password })
       .expect(201);
 
-    await userModel.updateOne({ email: adminEmail }, { role: Role.ADMIN });
+    await userModel.updateOne(
+      { email: userEmail },
+      { isEmailVerified: true, emailVerificationCodeHash: null },
+    );
+
+    await userModel.updateOne(
+      { email: adminEmail },
+      {
+        role: Role.ADMIN,
+        isEmailVerified: true,
+        emailVerificationCodeHash: null,
+      },
+    );
 
     const userLoginRes = await request(server())
       .post(`/${apiPrefix}/auth/login`)

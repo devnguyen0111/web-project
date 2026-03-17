@@ -10,9 +10,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -38,6 +41,36 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Login successful' })
   async login(@Body() payload: LoginDto) {
     return this.authService.login(payload);
+  }
+
+  @Public()
+  @Post('verify-email')
+  @ApiOperation({ summary: 'Verify email with a one-time code' })
+  @ApiBody({ type: VerifyEmailDto })
+  @ApiResponse({ status: 201, description: 'Email verified successfully' })
+  async verifyEmail(@Body() payload: VerifyEmailDto) {
+    return this.authService.verifyEmail(payload);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @ApiOperation({ summary: 'Send password reset code to email' })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Reset code sent (if email exists)',
+  })
+  async forgotPassword(@Body() payload: ForgotPasswordDto) {
+    return this.authService.forgotPassword(payload);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @ApiOperation({ summary: 'Reset password with one-time code' })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({ status: 201, description: 'Password reset successfully' })
+  async resetPassword(@Body() payload: ResetPasswordDto) {
+    return this.authService.resetPassword(payload);
   }
 
   @Public()

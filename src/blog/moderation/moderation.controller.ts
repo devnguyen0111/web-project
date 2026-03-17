@@ -30,6 +30,13 @@ export class ModerationController {
     return this.moderationService.listPending(query);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get pending post detail for moderation' })
+  @ApiParam({ name: 'id' })
+  findPendingById(@Param('id', ParseObjectIdPipe) id: string) {
+    return this.moderationService.findPendingById(id);
+  }
+
   @Patch(':id/approve')
   @ApiOperation({ summary: 'Approve pending post' })
   @ApiParam({ name: 'id' })

@@ -3,6 +3,8 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsDateString,
   IsMongoId,
   IsOptional,
   IsString,
@@ -10,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PostBlockDto } from './post-block.dto';
 
 class CreatePollOptionDto {
   @ApiProperty({ example: 'Yes' })
@@ -31,6 +34,22 @@ class CreatePollDto {
   @ValidateNested({ each: true })
   @Type(() => CreatePollOptionDto)
   options: CreatePollOptionDto[];
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'If true, poll is always open and ignores endsAt',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPermanent?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-12-31T23:59:59.000Z',
+    description: 'Required when isPermanent is false',
+  })
+  @IsOptional()
+  @IsDateString()
+  endsAt?: string;
 }
 
 export class CreatePostDto {
@@ -45,9 +64,16 @@ export class CreatePostDto {
   @MaxLength(500)
   excerpt?: string;
 
-  @ApiProperty({ example: 'Full post content in markdown or plain text' })
-  @IsString()
-  content: string;
+  @ApiProperty({
+    type: [PostBlockDto],
+    description: 'Block-based post content',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => PostBlockDto)
+  blocks: PostBlockDto[];
 
   @ApiPropertyOptional({ example: '60d39455b9c00b17d89f30f6' })
   @IsOptional()

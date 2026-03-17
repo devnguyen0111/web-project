@@ -1,10 +1,10 @@
 # Web Project API (NestJS)
 
-Backend API for authentication, users, and blog workflows (draft, moderation, publish), with MongoDB and MinIO integration.
+Backend API for authentication, users, and blog workflows (draft, moderation, publish), with MongoDB, MinIO integration, and email-based verification/reset flows.
 
 ## Current Scope
 
-- Auth: register, login, refresh token, logout, JWT guards.
+- Auth: register, email verification, login, refresh token, logout, forgot/reset password, JWT guards.
 - Users: profile and role-based access.
 - Blog: categories, tags, posts, moderation, comments, poll voting.
 - File storage: MinIO/S3 client + bucket handling.
@@ -93,6 +93,17 @@ Core variables:
 - `JWT_REFRESH_SECRET`: required refresh-token secret
 - `JWT_ACCESS_EXPIRES_IN`: access token TTL (default `15m`)
 - `JWT_REFRESH_EXPIRES_IN`: refresh token TTL (default `7d`)
+- `EMAIL_VERIFICATION_CODE_EXPIRES_IN_MINUTES`: verification code TTL (default `10`)
+- `PASSWORD_RESET_CODE_EXPIRES_IN_MINUTES`: reset code TTL (default `10`)
+
+Mail/SMTP variables:
+
+- `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`
+- `MAIL_USER`, `MAIL_PASS`
+- `MAIL_FROM`
+
+If SMTP is not fully configured, backend falls back to log-preview mode for emails.
+Email HTML is rendered with Handlebars templates in `src/mail/templates`.
 
 MinIO/S3 variables:
 
@@ -127,4 +138,5 @@ npm run lint
 From `package.json`:
 
 - `npm run migrate:role-user-to-author`
+- `npm run migrate:post-content-to-blocks`
 - `npm run seed:technology-posts`

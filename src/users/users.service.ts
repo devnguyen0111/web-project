@@ -15,7 +15,11 @@ interface CreateUserInput {
   email: string;
   password: string;
   role?: Role;
+  isEmailVerified?: boolean;
 }
+
+const AUTH_SENSITIVE_FIELDS =
+  '+password +refreshToken +emailVerificationCodeHash +emailVerificationCodeExpiresAt +passwordResetCodeHash +passwordResetCodeExpiresAt';
 
 @Injectable()
 export class UsersService {
@@ -43,7 +47,7 @@ export class UsersService {
   async findByEmailWithSensitive(email: string): Promise<UserDocument | null> {
     return this.userModel
       .findOne({ email: email.toLowerCase() })
-      .select('+password +refreshToken');
+      .select(AUTH_SENSITIVE_FIELDS);
   }
 
   async findById(id: string): Promise<UserDocument | null> {
@@ -51,7 +55,7 @@ export class UsersService {
   }
 
   async findByIdWithSensitive(id: string): Promise<UserDocument | null> {
-    return this.userModel.findById(id).select('+password +refreshToken');
+    return this.userModel.findById(id).select(AUTH_SENSITIVE_FIELDS);
   }
 
   async findByIdOrFail(id: string): Promise<UserDocument> {
@@ -123,6 +127,65 @@ export class UsersService {
     });
   }
 
+  async updateEmailVerificationCode(
+    userId: string,
+    codeHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.userModel.findByIdAndUpdate(userId, {
+      emailVerificationCodeHash: codeHash,
+      emailVerificationCodeExpiresAt: expiresAt,
+    });
+  }
+
+  async markEmailAsVerified(userId: string): Promise<UserDocument> {
+    const user = await this.userModel
+      .findByIdAndUpdate(
+        userId,
+        {
+          isEmailVerified: true,
+          emailVerificationCodeHash: null,
+          emailVerificationCodeExpiresAt: null,
+        },
+        {
+          returnDocument: 'after',
+          runValidators: true,
+        },
+      )
+      .exec();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  async updatePasswordResetCode(
+    userId: string,
+    codeHash: string,
+    expiresAt: Date,
+  ): Promise<void> {
+    await this.userModel.findByIdAndUpdate(userId, {
+      passwordResetCodeHash: codeHash,
+      passwordResetCodeExpiresAt: expiresAt,
+    });
+  }
+
+  async clearPasswordResetCode(userId: string): Promise<void> {
+    await this.userModel.findByIdAndUpdate(userId, {
+      passwordResetCodeHash: null,
+      passwordResetCodeExpiresAt: null,
+    });
+  }
+
+  async updatePassword(userId: string, password: string): Promise<void> {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await this.userModel.findByIdAndUpdate(userId, {
+      password: hashedPassword,
+    });
+  }
+
   async listUsers(
     query: PaginationDto,
   ): Promise<PaginatedResponseDto<UserResponseDto>> {
@@ -151,6 +214,7 @@ export class UsersService {
       fullName: user.fullName,
       email: user.email,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

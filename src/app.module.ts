@@ -13,6 +13,7 @@ import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
 import minioConfig from './config/minio.config';
+import mailConfig from './config/mail.config';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { BlogModule } from './blog/blog.module';
@@ -22,7 +23,7 @@ import { MinioModule } from './minio/minio.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, minioConfig],
+      load: [appConfig, databaseConfig, jwtConfig, minioConfig, mailConfig],
     }),
     MinioModule,
     DatabaseModule,

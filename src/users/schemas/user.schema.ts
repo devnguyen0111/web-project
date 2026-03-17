@@ -18,11 +18,26 @@ export class User {
   @Prop({ type: String, enum: Role, default: Role.AUTHOR })
   role: Role;
 
+  @Prop({ default: false })
+  isEmailVerified: boolean;
+
   @Prop()
   avatarUrl?: string;
 
   @Prop({ select: false })
   refreshToken?: string;
+
+  @Prop({ select: false })
+  emailVerificationCodeHash?: string;
+
+  @Prop({ type: Date, select: false })
+  emailVerificationCodeExpiresAt?: Date;
+
+  @Prop({ select: false })
+  passwordResetCodeHash?: string;
+
+  @Prop({ type: Date, select: false })
+  passwordResetCodeExpiresAt?: Date;
 
   createdAt: Date;
   updatedAt: Date;

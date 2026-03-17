@@ -20,7 +20,6 @@ async function run(): Promise<void> {
       { $set: { role: 'author' } },
     )) as MigrationResult;
 
-    // eslint-disable-next-line no-console
     console.log(
       `[role-migration] matched=${result.matchedCount} modified=${result.modifiedCount}`,
     );
@@ -30,7 +29,6 @@ async function run(): Promise<void> {
 }
 
 void run().catch((error: unknown) => {
-  // eslint-disable-next-line no-console
   console.error('[role-migration] failed', error);
   process.exit(1);
 });
