@@ -4,8 +4,8 @@
 
 > **Author:** DevNguyen0111
 > **Created:** 2026-03-09
-> **Version:** 1.0
-> **Status:** Planning Phase
+> **Version:** 1.1
+> **Status:** Phase 2 Completed (Preparing Phase 3)
 
 ---
 
@@ -41,9 +41,9 @@ Website cá nhân đa chức năng bao gồm:
 
 | Layer      | Technology                          | Mục đích                       |
 | ---------- | ----------------------------------- | ------------------------------ |
-| Frontend   | Next.js 14+ (App Router)            | SSR/SSG, SEO, Dashboard        |
-| Backend    | NestJS 10+ (TypeScript)             | REST API, modular architecture |
-| Database   | MongoDB 7+ + Mongoose               | Document storage               |
+| Frontend   | Next.js 16.1.6 + React 19 (App Router) | SSR/SSG, SEO, Dashboard     |
+| Backend    | NestJS 11 + TypeScript              | REST API, modular architecture |
+| Database   | MongoDB + Mongoose 9                | Document storage               |
 | Cache      | Redis 7+                            | Session, rate limit, realtime  |
 | Queue      | Bull (@nestjs/bull)                 | Email, async jobs              |
 | WebSocket  | Socket.io (@nestjs/websockets)      | Realtime notifications         |
@@ -54,6 +54,8 @@ Website cá nhân đa chức năng bao gồm:
 | API Docs   | Swagger (@nestjs/swagger)           | Auto-generated docs            |
 | Validation | class-validator + class-transformer | Input validation               |
 | Testing    | Jest                                | Unit + E2E tests               |
+
+> Ghi chú trạng thái hiện tại (2026-03-18): backend/frontend đã hoàn tất phạm vi Blog Phase 2; Redis/Bull/WebSocket chưa bật trong codebase hiện tại.
 
 ---
 
@@ -1304,17 +1306,17 @@ server/
 
 **Tasks:**
 
-- [ ] Setup NestJS project + TypeScript
+- [x] Setup NestJS project + TypeScript
 - [ ] Docker Compose (MongoDB + Redis)
-- [ ] Config module (env vars)
-- [ ] Database module (Mongoose connection)
-- [ ] Common: guards, filters, interceptors, pipes, dto, utils
-- [ ] Auth module: register, login, refresh, logout
-- [ ] JWT strategy + refresh token rotation
-- [ ] Users module: schema, CRUD profile
-- [ ] Role system (decorators + guards)
-- [ ] Swagger setup
-- [ ] Admin seeder (tạo tài khoản admin đầu tiên)
+- [x] Config module (env vars)
+- [x] Database module (Mongoose connection)
+- [x] Common: guards, filters, interceptors, pipes, dto, utils
+- [x] Auth module: register, login, refresh, logout
+- [x] JWT strategy + refresh token rotation
+- [x] Users module: schema, CRUD profile
+- [x] Role system (decorators + guards)
+- [x] Swagger setup
+- [x] Admin seeder (tạo tài khoản admin đầu tiên)
 
 **Kết quả:** Đăng ký, đăng nhập, JWT hoạt động. Swagger docs chạy.
 
@@ -1326,17 +1328,17 @@ server/
 
 **Tasks:**
 
-- [ ] Upload module (ảnh → S3/Cloudinary)
-- [ ] Categories module (CRUD, nested)
-- [ ] Tags module (CRUD, usage count)
-- [ ] Posts module: create draft, update, delete, submit, listing, search
-- [ ] Moderation module: pending queue, approve, reject
-- [ ] Comments module: nested replies, likes, hide (staff)
-- [ ] Poll system: embedded in post, vote, results
-- [ ] Full-text search (MongoDB text index)
-- [ ] Bookmark system
+- [x] Upload module (ảnh → MinIO/S3)
+- [x] Categories module (CRUD, parentId-based nesting)
+- [x] Tags module (CRUD, usage count)
+- [x] Posts module: create draft, update, delete, submit, listing, search
+- [x] Moderation module: pending queue, approve, reject
+- [x] Comments module: nested replies, likes, hide (staff)
+- [x] Poll system: embedded in post, vote, results
+- [x] Full-text search (MongoDB text index + searchText)
+- [x] Bookmark system
 
-**Kết quả:** Blog hoàn chỉnh với duyệt bài. Demo được.
+**Kết quả:** Hoàn tất backend + frontend cho Blog/Moderation (đã verify lint/test/build).
 
 ---
 
@@ -1359,6 +1361,14 @@ server/
 - [ ] **⚠️ Unit tests cho wallet transactions (BẮT BUỘC)**
 
 **Kết quả:** Nạp coin, nhận coin, wallet hoạt động.
+
+**Entry checklist trước khi bắt đầu Phase 3 (đã kiểm tra 2026-03-18):**
+
+- [x] Backend build + test + e2e đang chạy được.
+- [x] Frontend lint + test + build đang xanh.
+- [x] Docs runtime (README backend/frontend) đã đồng bộ với code.
+- [ ] Chốt provider thanh toán ưu tiên (VNPay/MoMo/Stripe) cho đợt triển khai đầu.
+- [ ] Chốt thiết kế idempotency cho callback/IPN payment.
 
 ---
 
@@ -1434,8 +1444,8 @@ server/
 
 ```
 Phase 1 ████████░░░░░░░░░░░░░░░░░░░░░░  Tuần 1-2    (Nền tảng)
-Phase 2 ░░░░░░░░██████░░░░░░░░░░░░░░░░  Tuần 2-3    (Blog)
-Phase 3 ░░░░░░░░░░░░░░████████░░░░░░░░  Tuần 4-5    (Wallet) ⚠️
+Phase 2 ████████████████░░░░░░░░░░░░░░  Tuần 2-3    (Blog) ✅
+Phase 3 ░░░░░░░░░░░░░░████████░░░░░░░░  Tuần 4-5    (Wallet) ▶
 Phase 4 ░░░░░░░░░░░░░░░░░░░░░░████████  Tuần 5-7    (Store)
 Phase 5 ░░░░░░░░░░░░░░░░░░░░░░░░░░████  Tuần 7-8    (Support)
 Phase 6 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██  Tuần 9-11   (Polish)
