@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
 import { Model } from 'mongoose';
@@ -7,6 +11,7 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { Role } from '../common/constants/roles.constant';
 import { MinioService } from '../minio/minio.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { User, UserDocument } from './schemas/user.schema';
 
@@ -16,6 +21,7 @@ interface CreateUserInput {
   password: string;
   role?: Role;
   isEmailVerified?: boolean;
+  isActive?: boolean;
 }
 
 const AUTH_SENSITIVE_FIELDS =
@@ -208,6 +214,149 @@ export class UsersService {
     );
   }
 
+  async updateUserRole(
+    actorUserId: string,
+    targetUserId: string,
+    role: Role,
+  ): Promise<UserDocument> {
+    if (role === Role.GUEST) {
+      throw new BadRequestException('Guest role cannot be assigned to users');
+    }
+
+    if (actorUserId === targetUserId) {
+      throw new BadRequestException('Admin cannot change their own role');
+    }
+
+    const targetUser = await this.findByIdOrFail(targetUserId);
+    if (targetUser.role === role) {
+      return targetUser;
+    }
+
+    if (targetUser.role === Role.ADMIN && role !== Role.ADMIN) {
+      const adminCount = await this.userModel.countDocuments({
+        role: Role.ADMIN,
+      });
+      if (adminCount <= 1) {
+        throw new BadRequestException('Cannot change role of the last admin');
+      }
+    }
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(
+        targetUserId,
+        {
+          role,
+          refreshToken: null,
+        },
+        {
+          returnDocument: 'after',
+          runValidators: true,
+        },
+      )
+      .exec();
+
+    if (!updatedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    return updatedUser;
+  }
+
+  async updateUserStatus(
+    actorUserId: string,
+    targetUserId: string,
+    isActive: boolean,
+  ): Promise<UserDocument> {
+    if (actorUserId === targetUserId && !isActive) {
+      throw new BadRequestException('Admin cannot disable their own account');
+    }
+
+    const targetUser = await this.findByIdOrFail(targetUserId);
+    const currentActive = targetUser.isActive !== false;
+    if (currentActive === isActive) {
+      return targetUser;
+    }
+
+    if (targetUser.role === Role.ADMIN && currentActive && !isActive) {
+      const activeAdminCount = await this.userModel.countDocuments({
+        role: Role.ADMIN,
+        isActive: { $ne: false },
+      });
+      if (activeAdminCount <= 1) {
+        throw new BadRequestException('Cannot disable the last active admin');
+      }
+    }
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(
+        targetUserId,
+        {
+          isActive,
+          refreshToken: null,
+        },
+        {
+          returnDocument: 'after',
+          runValidators: true,
+        },
+      )
+      .exec();
+
+    if (!updatedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    return updatedUser;
+  }
+
+  async updateUserByAdmin(
+    actorUserId: string,
+    targetUserId: string,
+    payload: UpdateUserAdminDto,
+  ): Promise<UserDocument> {
+    const hasPayload = Object.values(payload).some(
+      (value) => value !== undefined,
+    );
+    if (!hasPayload) {
+      throw new BadRequestException('At least one field must be provided');
+    }
+
+    const targetUser = await this.findByIdOrFail(targetUserId);
+    if (
+      actorUserId === targetUserId &&
+      payload.isEmailVerified !== undefined &&
+      payload.isEmailVerified !== targetUser.isEmailVerified
+    ) {
+      throw new BadRequestException(
+        'Admin cannot change own verification state via admin endpoint',
+      );
+    }
+
+    const normalizedPayload: Partial<UpdateUserAdminDto> = {
+      ...payload,
+      ...(payload.email ? { email: payload.email.toLowerCase() } : {}),
+    };
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(
+        targetUserId,
+        {
+          ...normalizedPayload,
+          ...(payload.email ? { refreshToken: null } : {}),
+        },
+        {
+          returnDocument: 'after',
+          runValidators: true,
+        },
+      )
+      .exec();
+
+    if (!updatedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    return updatedUser;
+  }
+
   toResponse(user: UserDocument): UserResponseDto {
     return {
       id: user.id,
@@ -215,6 +364,7 @@ export class UsersService {
       email: user.email,
       role: user.role,
       isEmailVerified: user.isEmailVerified,
+      isActive: user.isActive !== false,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,

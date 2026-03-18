@@ -27,6 +27,9 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { ParseFilePipeBuilder } from '@nestjs/common';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
+import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -131,6 +134,63 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User returned' })
   async getUserById(@Param('id', ParseObjectIdPipe) id: string) {
     const user = await this.usersService.findByIdOrFail(id);
+    return this.usersService.toResponse(user);
+  }
+
+  @Patch(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Update user profile (admin only)' })
+  @ApiParam({ name: 'id', description: 'Mongo ObjectId of the user' })
+  @ApiBody({ type: UpdateUserAdminDto })
+  @ApiResponse({ status: 200, description: 'User updated' })
+  async updateUserByAdmin(
+    @CurrentUser('userId') adminUserId: string,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() payload: UpdateUserAdminDto,
+  ) {
+    const user = await this.usersService.updateUserByAdmin(
+      adminUserId,
+      id,
+      payload,
+    );
+    return this.usersService.toResponse(user);
+  }
+
+  @Patch(':id/role')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Update user role (admin only)' })
+  @ApiParam({ name: 'id', description: 'Mongo ObjectId of the user' })
+  @ApiBody({ type: UpdateUserRoleDto })
+  @ApiResponse({ status: 200, description: 'User role updated' })
+  async updateUserRole(
+    @CurrentUser('userId') adminUserId: string,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() payload: UpdateUserRoleDto,
+  ) {
+    const user = await this.usersService.updateUserRole(
+      adminUserId,
+      id,
+      payload.role,
+    );
+    return this.usersService.toResponse(user);
+  }
+
+  @Patch(':id/status')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Update user active status (admin only)' })
+  @ApiParam({ name: 'id', description: 'Mongo ObjectId of the user' })
+  @ApiBody({ type: UpdateUserStatusDto })
+  @ApiResponse({ status: 200, description: 'User status updated' })
+  async updateUserStatus(
+    @CurrentUser('userId') adminUserId: string,
+    @Param('id', ParseObjectIdPipe) id: string,
+    @Body() payload: UpdateUserStatusDto,
+  ) {
+    const user = await this.usersService.updateUserStatus(
+      adminUserId,
+      id,
+      payload.isActive,
+    );
     return this.usersService.toResponse(user);
   }
 }

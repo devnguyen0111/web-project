@@ -39,26 +39,26 @@ export class CategoriesController {
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Get('admin/all')
-  @ApiOperation({ summary: 'List all categories (admin)' })
+  @ApiOperation({ summary: 'List all categories (staff/admin)' })
   listAll() {
     return this.categoriesService.findAll();
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Post()
-  @ApiOperation({ summary: 'Create category (admin)' })
+  @ApiOperation({ summary: 'Create category (staff/admin)' })
   @ApiBody({ type: CreateCategoryDto })
   create(@Body() payload: CreateCategoryDto) {
     return this.categoriesService.create(payload);
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Patch(':id')
-  @ApiOperation({ summary: 'Update category (admin)' })
+  @ApiOperation({ summary: 'Update category (staff/admin)' })
   @ApiParam({ name: 'id' })
   @ApiBody({ type: UpdateCategoryDto })
   update(
@@ -69,9 +69,9 @@ export class CategoriesController {
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete category (admin)' })
+  @ApiOperation({ summary: 'Delete category (staff/admin)' })
   @ApiParam({ name: 'id' })
   remove(@Param('id', ParseObjectIdPipe) id: string) {
     return this.categoriesService.remove(id);

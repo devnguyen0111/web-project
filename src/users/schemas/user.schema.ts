@@ -21,6 +21,9 @@ export class User {
   @Prop({ default: false })
   isEmailVerified: boolean;
 
+  @Prop({ default: true })
+  isActive: boolean;
+
   @Prop()
   avatarUrl?: string;
 

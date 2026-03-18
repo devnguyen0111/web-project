@@ -43,26 +43,26 @@ export class TagsController {
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Get('admin/all')
-  @ApiOperation({ summary: 'List all tags (admin)' })
+  @ApiOperation({ summary: 'List all tags (staff/admin)' })
   listAll() {
     return this.tagsService.findAll();
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Post()
-  @ApiOperation({ summary: 'Create tag (admin)' })
+  @ApiOperation({ summary: 'Create tag (staff/admin)' })
   @ApiBody({ type: CreateTagDto })
   create(@Body() payload: CreateTagDto) {
     return this.tagsService.create(payload);
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Patch(':id')
-  @ApiOperation({ summary: 'Update tag (admin)' })
+  @ApiOperation({ summary: 'Update tag (staff/admin)' })
   @ApiParam({ name: 'id' })
   @ApiBody({ type: UpdateTagDto })
   update(
@@ -73,9 +73,9 @@ export class TagsController {
   }
 
   @ApiBearerAuth()
-  @Roles(Role.ADMIN)
+  @Roles(Role.STAFF, Role.ADMIN)
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete tag (admin)' })
+  @ApiOperation({ summary: 'Delete tag (staff/admin)' })
   @ApiParam({ name: 'id' })
   remove(@Param('id', ParseObjectIdPipe) id: string) {
     return this.tagsService.remove(id);

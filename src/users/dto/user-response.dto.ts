@@ -6,6 +6,7 @@ export class UserResponseDto {
   email: string;
   role: Role;
   isEmailVerified: boolean;
+  isActive: boolean;
   avatarUrl?: string;
   createdAt: Date;
   updatedAt: Date;

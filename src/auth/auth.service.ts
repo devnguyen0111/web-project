@@ -72,6 +72,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.isActive === false) {
+      throw new ForbiddenException('Account has been disabled');
+    }
+
     if (!user.isEmailVerified) {
       await this.issueEmailVerificationCode(user.id, user.email);
       throw new ForbiddenException(
@@ -92,6 +96,10 @@ export class AuthService {
     const user = await this.usersService.findByIdWithSensitive(userId);
     if (!user?.refreshToken) {
       throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (user.isActive === false) {
+      throw new UnauthorizedException('Account has been disabled');
     }
 
     if (!user.isEmailVerified) {
