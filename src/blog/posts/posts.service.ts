@@ -366,7 +366,9 @@ export class PostsService {
         .lean(),
       this.postModel.countDocuments(filter),
     ]);
-    const enrichedPosts = await this.enrichPostsWithAuthor(data as PostDocument[]);
+    const enrichedPosts = await this.enrichPostsWithAuthor(
+      data as PostDocument[],
+    );
 
     return new PaginatedResponseDto(
       enrichedPosts,
@@ -399,7 +401,9 @@ export class PostsService {
         .lean(),
       this.postModel.countDocuments(filter),
     ]);
-    const enrichedPosts = await this.enrichPostsWithAuthor(data as PostDocument[]);
+    const enrichedPosts = await this.enrichPostsWithAuthor(
+      data as PostDocument[],
+    );
 
     return new PaginatedResponseDto(
       enrichedPosts,
@@ -691,7 +695,9 @@ export class PostsService {
         .lean(),
       this.postModel.countDocuments(filter),
     ]);
-    const enrichedPosts = await this.enrichPostsWithAuthor(data as PostDocument[]);
+    const enrichedPosts = await this.enrichPostsWithAuthor(
+      data as PostDocument[],
+    );
 
     return new PaginatedResponseDto(
       enrichedPosts,
@@ -801,7 +807,9 @@ export class PostsService {
       return [];
     }
 
-    const authorIds = [...new Set(posts.map((post) => post.authorId.toString()))];
+    const authorIds = [
+      ...new Set(posts.map((post) => post.authorId.toString())),
+    ];
     const authors = await this.userModel
       .find({ _id: { $in: authorIds } })
       .select('fullName avatarUrl')
@@ -837,7 +845,9 @@ export class PostsService {
     });
   }
 
-  private async enrichPostWithAuthor(post: PostDocument): Promise<PostDocument> {
+  private async enrichPostWithAuthor(
+    post: PostDocument,
+  ): Promise<PostDocument> {
     const [enrichedPost] = await this.enrichPostsWithAuthor([post]);
     return enrichedPost;
   }
