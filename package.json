@@ -20,6 +20,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "migrate:role-user-to-author": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-user-role-to-author.ts",
     "migrate:post-content-to-blocks": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-post-content-to-blocks.ts",
+    "migrate:wallet-transaction-units": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-wallet-transaction-units.ts",
+    "migrate:subscription-tier-v2": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-subscription-tier-v2.ts",
     "seed:technology-posts": "ts-node -r tsconfig-paths/register src/database/seeders/seed-technology-posts.ts"
   },
   "dependencies": {
@@ -30,6 +32,7 @@
     "@nestjs/mongoose": "^11.0.4",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^5.0.1",
     "@nestjs/swagger": "^11.2.6",
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",

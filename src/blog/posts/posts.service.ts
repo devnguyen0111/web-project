@@ -4,12 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { Role } from '../../common/constants/roles.constant';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { toSlug } from '../../common/utils/slug.util';
 import { MinioService } from '../../minio/minio.service';
+import { SubscriptionsService } from '../../subscriptions/subscriptions.service';
 import { User } from '../../users/schemas/user.schema';
 import { Category } from '../categories/schemas/category.schema';
 import { Tag } from '../tags/schemas/tag.schema';
@@ -25,6 +27,7 @@ import {
   PostStatus,
 } from './schemas/post.schema';
 import { PollVote } from './schemas/poll-vote.schema';
+import { WalletService } from '../../wallet/wallet.service';
 
 interface AuthUser {
   userId: string;
@@ -87,13 +90,19 @@ type PostWithAuthor = PostDocument & {
 export class PostsService {
   private readonly viewDedupWindowMs = 15_000;
   private readonly recentViewTracker = new Map<string, number>();
+  private transactionCapabilityChecked = false;
+  private transactionsSupported = true;
 
   constructor(
+    @InjectConnection() private readonly connection: Connection,
     @InjectModel(Post.name) private readonly postModel: Model<Post>,
     @InjectModel(PollVote.name) private readonly pollVoteModel: Model<PollVote>,
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
     @InjectModel(Tag.name) private readonly tagModel: Model<Tag>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly subscriptionsService: SubscriptionsService,
+    private readonly walletService: WalletService,
+    private readonly configService: ConfigService,
     private readonly minioService: MinioService,
   ) {}
 
@@ -101,31 +110,47 @@ export class PostsService {
     userId: string,
     payload: CreatePostDto,
   ): Promise<PostDocument> {
-    await this.validateReferences(payload.categoryId, payload.tagIds);
+    const post = await this.executeInTransaction(async (session) => {
+      await this.validateReferences(payload.categoryId, payload.tagIds);
+      await this.subscriptionsService.consumePostQuota(userId, 1, session);
 
-    const normalizedBlocks = this.normalizeBlocks(payload.blocks);
-    const searchText = this.buildSearchText(payload.excerpt, normalizedBlocks);
-    const slug = await this.ensureUniqueSlug(payload.title);
-    const post = await this.postModel.create({
-      authorId: new Types.ObjectId(userId),
-      title: payload.title,
-      slug,
-      excerpt: payload.excerpt,
-      blocks: normalizedBlocks,
-      searchText,
-      content: searchText,
-      categoryId: payload.categoryId
-        ? new Types.ObjectId(payload.categoryId)
-        : undefined,
-      tags: (payload.tagIds ?? []).map((tagId) => new Types.ObjectId(tagId)),
-      status: PostStatus.DRAFT,
-      poll: payload.poll ? this.normalizePoll(payload.poll) : undefined,
+      const normalizedBlocks = this.normalizeBlocks(payload.blocks);
+      const searchText = this.buildSearchText(
+        payload.excerpt,
+        normalizedBlocks,
+      );
+      const slug = await this.ensureUniqueSlug(payload.title);
+      const createdPosts = await this.postModel.create(
+        [
+          {
+            authorId: new Types.ObjectId(userId),
+            title: payload.title,
+            slug,
+            excerpt: payload.excerpt,
+            blocks: normalizedBlocks,
+            searchText,
+            content: searchText,
+            categoryId: payload.categoryId
+              ? new Types.ObjectId(payload.categoryId)
+              : undefined,
+            tags: (payload.tagIds ?? []).map(
+              (tagId) => new Types.ObjectId(tagId),
+            ),
+            status: PostStatus.DRAFT,
+            poll: payload.poll ? this.normalizePoll(payload.poll) : undefined,
+          },
+        ],
+        { session },
+      );
+
+      await this.tagModel.updateMany(
+        { _id: { $in: payload.tagIds ?? [] } },
+        { $inc: { usageCount: 1 } },
+        { session },
+      );
+
+      return createdPosts[0];
     });
-
-    await this.tagModel.updateMany(
-      { _id: { $in: payload.tagIds ?? [] } },
-      { $inc: { usageCount: 1 } },
-    );
 
     return this.enrichPostWithAuthor(post);
   }
@@ -723,23 +748,59 @@ export class PostsService {
   }
 
   async approve(postId: string, reviewerId: string): Promise<PostDocument> {
-    const post = await this.postModel.findById(postId).exec();
-    if (!post) {
-      throw new NotFoundException('Post not found');
-    }
+    return this.executeInTransaction(async (session) => {
+      const post = await this.postModel
+        .findById(postId)
+        .session(session)
+        .exec();
+      if (!post) {
+        throw new NotFoundException('Post not found');
+      }
 
-    if (post.status !== PostStatus.PENDING) {
-      throw new BadRequestException('Only pending posts can be approved');
-    }
+      if (post.status !== PostStatus.PENDING) {
+        throw new BadRequestException('Only pending posts can be approved');
+      }
 
-    post.status = PostStatus.PUBLISHED;
-    post.reviewedBy = new Types.ObjectId(reviewerId);
-    post.reviewedAt = new Date();
-    post.publishedAt = new Date();
-    post.rejectionReason = undefined;
+      post.status = PostStatus.PUBLISHED;
+      post.reviewedBy = new Types.ObjectId(reviewerId);
+      post.reviewedAt = new Date();
+      post.publishedAt = new Date();
+      post.rejectionReason = undefined;
 
-    await post.save();
-    return this.enrichPostWithAuthor(post);
+      const rewardCoins = this.getPostRewardCoins();
+      const coinToVndRate = this.getCoinToVndRate();
+      const rewardAmount = this.toWalletAmountFromCoins(
+        rewardCoins,
+        coinToVndRate,
+      );
+      if (rewardAmount > 0) {
+        await this.walletService.reward(
+          post.authorId.toString(),
+          rewardAmount,
+          {
+            description: `Reward for approved post "${post.title}"`,
+            note: `Post ${post.id} approved by reviewer ${reviewerId}`,
+            reference: {
+              model: 'post',
+              id: post.id,
+            },
+            processedBy: reviewerId,
+            idempotencyKey: `post-reward:${post.id}`,
+            metadata: {
+              postId: post.id,
+              reviewerId,
+              rewardCoins,
+              rewardAmount,
+              coinToVndRate,
+            },
+          },
+          session,
+        );
+      }
+
+      await post.save({ session });
+      return this.enrichPostWithAuthor(post);
+    });
   }
 
   async reject(
@@ -763,6 +824,120 @@ export class PostsService {
 
     await post.save();
     return this.enrichPostWithAuthor(post);
+  }
+
+  private async executeInTransaction<T>(
+    callback: (session: ClientSession) => Promise<T>,
+    session?: ClientSession,
+  ): Promise<T> {
+    if (session) {
+      return callback(session);
+    }
+
+    const startedSession = await this.connection.startSession();
+    try {
+      const shouldUseTransactions = await this.canUseTransactions();
+      if (shouldUseTransactions) {
+        try {
+          let result!: T;
+          await startedSession.withTransaction(async () => {
+            result = await callback(startedSession);
+          });
+          return result;
+        } catch (error) {
+          if (!this.isTransactionUnsupportedError(error)) {
+            throw error;
+          }
+
+          this.transactionsSupported = false;
+        }
+      }
+
+      return await callback(startedSession);
+    } finally {
+      await startedSession.endSession();
+    }
+  }
+
+  private async canUseTransactions(): Promise<boolean> {
+    if (this.transactionCapabilityChecked) {
+      return this.transactionsSupported;
+    }
+
+    try {
+      const db = this.connection.db;
+      if (!db) {
+        throw new Error('MongoDB connection is not ready');
+      }
+
+      const hello = await db.admin().command({ hello: 1 });
+      const isReplicaSetMember = Boolean(hello?.setName);
+      const isMongos = hello?.msg === 'isdbgrid';
+      this.transactionsSupported = isReplicaSetMember || isMongos;
+    } catch {
+      this.transactionsSupported = true;
+    } finally {
+      this.transactionCapabilityChecked = true;
+    }
+
+    return this.transactionsSupported;
+  }
+
+  private isTransactionUnsupportedError(error: unknown): boolean {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+
+    if (
+      message.includes(
+        'Transaction numbers are only allowed on a replica set member or mongos',
+      )
+    ) {
+      return true;
+    }
+
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? (error as { code?: unknown }).code
+        : undefined;
+
+    return code === 20;
+  }
+
+  private getPostRewardCoins(): number {
+    const configuredReward = this.configService.get<number>(
+      'wallet.postRewardCoins',
+    );
+    if (!configuredReward || !Number.isFinite(configuredReward)) {
+      return 1;
+    }
+
+    return configuredReward > 0 ? configuredReward : 0;
+  }
+
+  private getCoinToVndRate(): number {
+    const configuredRate = this.configService.get<number>(
+      'wallet.coinToVndRate',
+    );
+    if (!configuredRate || !Number.isFinite(configuredRate)) {
+      return 1000;
+    }
+
+    return configuredRate > 0 ? configuredRate : 1000;
+  }
+
+  private toWalletAmountFromCoins(
+    amountCoins: number,
+    coinToVndRate: number,
+  ): number {
+    if (!Number.isFinite(amountCoins) || amountCoins <= 0) {
+      return 0;
+    }
+
+    return Math.round(amountCoins * coinToVndRate);
   }
 
   private ensureOwnership(post: PostDocument, user: AuthUser): void {

@@ -85,6 +85,84 @@ export class MailService {
     await this.sendMail({ to, subject, text, html });
   }
 
+  async sendSubscriptionReminder(
+    to: string,
+    payload: {
+      planName: string;
+      expiresAt: Date;
+      daysRemaining: number;
+      requiredCoins: number;
+    },
+  ): Promise<void> {
+    const subject = `Subscription reminder: ${payload.planName} expires in ${payload.daysRemaining} day(s)`;
+    const text =
+      `Your ${payload.planName} subscription will expire on ${payload.expiresAt.toISOString()}. ` +
+      `Please keep at least ${payload.requiredCoins} coins in wallet for auto-renew.`;
+    const html = `
+      <p>Your <strong>${payload.planName}</strong> subscription will expire on <strong>${payload.expiresAt.toISOString()}</strong>.</p>
+      <p>Please keep at least <strong>${payload.requiredCoins} coins</strong> in your wallet for auto-renew.</p>
+    `;
+    await this.sendMail({ to, subject, text, html });
+  }
+
+  async sendSubscriptionRenewed(
+    to: string,
+    payload: {
+      planName: string;
+      billingCycle: string;
+      nextRenewalAt: Date;
+      chargedCoins: number;
+    },
+  ): Promise<void> {
+    const subject = `Subscription renewed: ${payload.planName}`;
+    const text =
+      `Your ${payload.planName} plan has been renewed (${payload.billingCycle}). ` +
+      `Charged ${payload.chargedCoins} coins. Next renewal: ${payload.nextRenewalAt.toISOString()}.`;
+    const html = `
+      <p>Your <strong>${payload.planName}</strong> subscription has been renewed (${payload.billingCycle}).</p>
+      <p>Charged: <strong>${payload.chargedCoins} coins</strong>.</p>
+      <p>Next renewal: <strong>${payload.nextRenewalAt.toISOString()}</strong>.</p>
+    `;
+    await this.sendMail({ to, subject, text, html });
+  }
+
+  async sendSubscriptionRenewalFailed(
+    to: string,
+    payload: {
+      planName: string;
+      requiredCoins: number;
+      gracePeriodEndsAt: Date;
+    },
+  ): Promise<void> {
+    const subject = `Auto-renew failed: ${payload.planName}`;
+    const text =
+      `Auto-renew for ${payload.planName} failed due to insufficient wallet balance. ` +
+      `Required: ${payload.requiredCoins} coins. Grace period ends at ${payload.gracePeriodEndsAt.toISOString()}.`;
+    const html = `
+      <p>Auto-renew for <strong>${payload.planName}</strong> failed due to insufficient wallet balance.</p>
+      <p>Required: <strong>${payload.requiredCoins} coins</strong>.</p>
+      <p>Grace period ends at <strong>${payload.gracePeriodEndsAt.toISOString()}</strong>.</p>
+    `;
+    await this.sendMail({ to, subject, text, html });
+  }
+
+  async sendSubscriptionExpired(
+    to: string,
+    payload: {
+      previousPlanName: string;
+      expiredAt: Date;
+    },
+  ): Promise<void> {
+    const subject = `Subscription expired: ${payload.previousPlanName}`;
+    const text =
+      `Your ${payload.previousPlanName} subscription expired on ${payload.expiredAt.toISOString()} and is now downgraded to Free.`;
+    const html = `
+      <p>Your <strong>${payload.previousPlanName}</strong> subscription expired on <strong>${payload.expiredAt.toISOString()}</strong>.</p>
+      <p>Your account is now on the <strong>Free</strong> plan.</p>
+    `;
+    await this.sendMail({ to, subject, text, html });
+  }
+
   private renderTemplate(
     templateName: MailTemplateName,
     context: MailTemplateContext,

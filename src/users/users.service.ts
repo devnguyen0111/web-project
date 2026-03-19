@@ -12,8 +12,19 @@ import { Role } from '../common/constants/roles.constant';
 import { MinioService } from '../minio/minio.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
-import { UserResponseDto } from './dto/user-response.dto';
+import {
+  UserPostQuotaResponseDto,
+  UserResponseDto,
+  UserSubscriptionResponseDto,
+  WalletResponseDto,
+} from './dto/user-response.dto';
 import { User, UserDocument } from './schemas/user.schema';
+import { createDefaultWallet } from '../wallet/schemas/wallet.schema';
+import { createDefaultSubscription } from '../subscriptions/schemas/subscription.schema';
+import {
+  calculateSubscriptionQuota,
+  normalizeSubscription,
+} from '../subscriptions/subscription.util';
 
 interface CreateUserInput {
   fullName: string;
@@ -41,6 +52,8 @@ export class UsersService {
       ...input,
       password: hashedPassword,
       email: input.email.toLowerCase(),
+      wallet: createDefaultWallet(),
+      subscription: createDefaultSubscription(),
     });
 
     return createdUser;
@@ -358,6 +371,38 @@ export class UsersService {
   }
 
   toResponse(user: UserDocument): UserResponseDto {
+    const wallet = this.normalizeWallet(user.wallet);
+    const normalizedSubscription = normalizeSubscription(user.subscription);
+    const postQuota = calculateSubscriptionQuota(normalizedSubscription);
+    const subscription: UserSubscriptionResponseDto = {
+      planCode: normalizedSubscription.planCode,
+      planName: normalizedSubscription.planName,
+      basePostLimit: normalizedSubscription.basePostLimit,
+      extraPosts: normalizedSubscription.extraPosts,
+      monthlyPriceCoins: normalizedSubscription.monthlyPriceCoins,
+      billingCycle: normalizedSubscription.billingCycle,
+      autoRenew: normalizedSubscription.autoRenew,
+      cancelAtPeriodEnd: normalizedSubscription.cancelAtPeriodEnd,
+      status: normalizedSubscription.status,
+      startedAt: normalizedSubscription.startedAt,
+      expiresAt: normalizedSubscription.expiresAt,
+      currentPeriodStart: normalizedSubscription.currentPeriodStart,
+      currentPeriodEnd: normalizedSubscription.currentPeriodEnd,
+      postsUsedInPeriod: normalizedSubscription.postsUsedInPeriod,
+      renewedAt: normalizedSubscription.renewedAt,
+      nextRenewalAt: normalizedSubscription.nextRenewalAt,
+      renewalFailedAt: normalizedSubscription.renewalFailedAt,
+      gracePeriodEndsAt: normalizedSubscription.gracePeriodEndsAt,
+      reminder7dSentAt: normalizedSubscription.reminder7dSentAt,
+      reminder3dSentAt: normalizedSubscription.reminder3dSentAt,
+    };
+    const quota: UserPostQuotaResponseDto = {
+      allowedPosts: postQuota.allowedPosts,
+      usedPosts: postQuota.usedPosts,
+      remainingPosts: postQuota.remainingPosts,
+      exhausted: postQuota.exhausted,
+    };
+
     return {
       id: user.id,
       fullName: user.fullName,
@@ -366,8 +411,25 @@ export class UsersService {
       isEmailVerified: user.isEmailVerified,
       isActive: user.isActive !== false,
       avatarUrl: user.avatarUrl,
+      wallet,
+      subscription,
+      postQuota: quota,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+    };
+  }
+
+  private normalizeWallet(
+    wallet: Partial<WalletResponseDto> | undefined,
+  ): WalletResponseDto {
+    const defaults = createDefaultWallet();
+
+    return {
+      balance: wallet?.balance ?? defaults.balance,
+      frozenBalance: wallet?.frozenBalance ?? defaults.frozenBalance,
+      totalEarned: wallet?.totalEarned ?? defaults.totalEarned,
+      totalSpent: wallet?.totalSpent ?? defaults.totalSpent,
+      lifetimeDeposit: wallet?.lifetimeDeposit ?? defaults.lifetimeDeposit,
     };
   }
 }

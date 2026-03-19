@@ -275,7 +275,7 @@ export class CommentsService {
           ? author
           : {
               id: comment.authorId.toString(),
-              fullName: '[Ẩn danh]',
+              fullName: '[Anonymous]',
               avatarUrl: undefined,
             },
       };

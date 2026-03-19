@@ -4,8 +4,10 @@ import {
   Category,
   CategorySchema,
 } from '../categories/schemas/category.schema';
+import { SubscriptionsModule } from '../../subscriptions/subscriptions.module';
 import { Tag, TagSchema } from '../tags/schemas/tag.schema';
 import { User, UserSchema } from '../../users/schemas/user.schema';
+import { WalletModule } from '../../wallet/wallet.module';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { PollVote, PollVoteSchema } from './schemas/poll-vote.schema';
@@ -13,6 +15,8 @@ import { Post, PostSchema } from './schemas/post.schema';
 
 @Module({
   imports: [
+    SubscriptionsModule,
+    WalletModule,
     MongooseModule.forFeature([
       { name: Post.name, schema: PostSchema },
       { name: PollVote.name, schema: PollVoteSchema },

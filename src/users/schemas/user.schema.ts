@@ -1,6 +1,16 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
 import { Role } from '../../common/constants/roles.constant';
+import {
+  Wallet,
+  WalletSchema,
+  createDefaultWallet,
+} from '../../wallet/schemas/wallet.schema';
+import {
+  Subscription,
+  SubscriptionSchema,
+  createDefaultSubscription,
+} from '../../subscriptions/schemas/subscription.schema';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -17,6 +27,15 @@ export class User {
 
   @Prop({ type: String, enum: Role, default: Role.AUTHOR })
   role: Role;
+
+  @Prop({ type: WalletSchema, default: () => createDefaultWallet() })
+  wallet: Wallet;
+
+  @Prop({
+    type: SubscriptionSchema,
+    default: () => createDefaultSubscription(),
+  })
+  subscription: Subscription;
 
   @Prop({ default: false })
   isEmailVerified: boolean;
