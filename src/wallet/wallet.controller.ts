@@ -8,13 +8,14 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { AUTHOR_PLUS_ROLES, Role } from '../common/constants/roles.constant';
+import { AUTHOR_PLUS_ROLES } from '../common/constants/roles.constant';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
 import { CancelDepositDto } from './dto/cancel-deposit.dto';
 import { CreateDepositDto } from './dto/create-deposit.dto';
 import { WalletTransactionQueryDto } from './dto/wallet-transaction-query.dto';
+import { DepositService } from './deposit.service';
 import { buildDepositContext } from './request-context.util';
 import { WalletService } from './wallet.service';
 
@@ -23,7 +24,10 @@ import { WalletService } from './wallet.service';
 @Roles(...AUTHOR_PLUS_ROLES)
 @Controller('wallet')
 export class WalletController {
-  constructor(private readonly walletService: WalletService) {}
+  constructor(
+    private readonly walletService: WalletService,
+    private readonly depositService: DepositService,
+  ) {}
 
   @Get(['balance', 'me'])
   @ApiOperation({ summary: 'Get my wallet balance' })
@@ -52,7 +56,7 @@ export class WalletController {
     @Body() payload: CreateDepositDto,
     @Req() request: Request,
   ) {
-    return this.walletService.createDepositRequest(
+    return this.depositService.createDepositRequest(
       userId,
       payload,
       buildDepositContext(request),
@@ -66,7 +70,7 @@ export class WalletController {
     @CurrentUser('userId') userId: string,
     @Param('id', ParseObjectIdPipe) id: string,
   ) {
-    return this.walletService.getDepositRequest(userId, id);
+    return this.depositService.getDepositRequest(userId, id);
   }
 
   @Post(['deposit/:id/cancel', 'deposit-requests/:id/cancel'])
@@ -78,6 +82,6 @@ export class WalletController {
     @Param('id', ParseObjectIdPipe) id: string,
     @Body() payload: CancelDepositDto,
   ) {
-    return this.walletService.cancelDepositRequest(userId, id, payload?.reason);
+    return this.depositService.cancelDepositRequest(userId, id, payload?.reason);
   }
 }

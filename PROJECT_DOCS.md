@@ -5,7 +5,7 @@
 > **Author:** DevNguyen0111
 > **Created:** 2026-03-09
 > **Version:** 1.3
-> **Status:** Phase 3 In Progress (Wallet + Subscription Revamp Delivered)
+> **Status:** Phase 3 Completed (Wallet + PayOS + Subscription + Notifications Delivered)
 
 ---
 
@@ -1619,6 +1619,8 @@ Staff seen in moderation queue
 | ---------- | ------- | ------------------------------------------------------------ |
 | 2026-03-09 | 1.0     | Initial documentation                                        |
 | 2026-03-15 | 1.1     | Store switched to single-seller (Admin owner, Staff manager) |
+| 2026-03-18 | 1.2     | Wallet module delivered: coin balances, transactions, PayOS deposit flow, anti-fraud and admin adjust APIs |
+| 2026-03-19 | 1.3     | Subscription revamp + notifications: Free/Pro/VIP billing cycles, wallet-based purchase, auto-renew, reminder/renewal email + in-app notifications |
 
 ---
 

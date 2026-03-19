@@ -4,22 +4,26 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { OpsAlertService } from '../alerts/ops-alert.service';
+import { MongoTransactionService } from '../common/services/mongo-transaction.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notification.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import {
   Transaction,
+  TransactionStatus,
   TransactionType,
 } from '../wallet/schemas/transaction.schema';
 import { WalletService } from '../wallet/wallet.service';
 import { RenewSubscriptionDto } from './dto/renew-subscription.dto';
+import { SubscriptionHistoryItemDto } from './dto/subscription-history-item.dto';
 import { SubscriptionHistoryQueryDto } from './dto/subscription-history-query.dto';
 import {
   BillingCycle,
@@ -46,11 +50,13 @@ import { createDefaultSubscription } from './schemas/subscription.schema';
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
 
-  private transactionCapabilityChecked = false;
-
-  private transactionsSupported = true;
-
   private renewalProcessing = false;
+
+  private readonly renewalBatchSize = 100;
+
+  private readonly renewalConcurrency = 5;
+
+  private readonly renewalLookaheadDays = 7;
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<User>,
@@ -59,8 +65,9 @@ export class SubscriptionsService {
     @InjectConnection() private readonly connection: Connection,
     private readonly walletService: WalletService,
     private readonly configService: ConfigService,
+    private readonly mongoTransactionService: MongoTransactionService,
     private readonly notificationsService: NotificationsService,
-    private readonly mailService: MailService,
+    @Optional() private readonly opsAlertService?: OpsAlertService,
   ) {}
 
   getPlans() {
@@ -99,19 +106,21 @@ export class SubscriptionsService {
       payload.months && Number.isFinite(payload.months)
         ? Math.max(1, Math.floor(payload.months))
         : undefined;
+    const hasExplicitBillingCycle = payload.billingCycle !== undefined;
     const billingCycle =
       payload.billingCycle ?? toLegacyMonthsCycle(legacyMonths ?? 1);
+    const monthsOverride = hasExplicitBillingCycle ? undefined : legacyMonths;
 
     let totalCostCoins = 0;
-    if (legacyMonths && !payload.billingCycle) {
+    if (monthsOverride) {
       const plan = getSubscriptionPlanDefinition(requestedPlanCode);
-      if (legacyMonths === 3 || legacyMonths === 12) {
+      if (monthsOverride === 3 || monthsOverride === 12) {
         totalCostCoins = calculatePlanPriceByCycle(
           requestedPlanCode,
-          toLegacyMonthsCycle(legacyMonths),
+          toLegacyMonthsCycle(monthsOverride),
         ).cyclePriceCoins;
       } else {
-        totalCostCoins = plan.monthlyPriceCoins * legacyMonths;
+        totalCostCoins = plan.monthlyPriceCoins * monthsOverride;
       }
     } else {
       totalCostCoins = calculatePlanPriceByCycle(
@@ -127,21 +136,20 @@ export class SubscriptionsService {
       const user = await this.findUserOrFail(userId, session);
       const now = new Date();
       const currentSubscription = normalizeSubscription(user.subscription, now);
-      const nextSubscription =
-        legacyMonths && !payload.billingCycle
-          ? renewSubscriptionPlan(
-              currentSubscription,
-              requestedPlanCode,
-              legacyMonths,
-              now,
-            )
-          : purchaseSubscriptionPlan(
-              currentSubscription,
-              requestedPlanCode,
-              billingCycle,
-              legacyMonths,
-              now,
-            );
+      const nextSubscription = monthsOverride
+        ? renewSubscriptionPlan(
+            currentSubscription,
+            requestedPlanCode,
+            monthsOverride,
+            now,
+          )
+        : purchaseSubscriptionPlan(
+            currentSubscription,
+            requestedPlanCode,
+            billingCycle,
+            undefined,
+            now,
+          );
 
       if (totalCostAmount > 0) {
         await this.walletService.subscribe(
@@ -158,7 +166,7 @@ export class SubscriptionsService {
             metadata: {
               planCode: nextSubscription.planCode,
               billingCycle,
-              months: legacyMonths,
+              months: monthsOverride,
               monthlyPriceCoins: nextSubscription.monthlyPriceCoins,
               totalCostCoins,
               totalCostAmount,
@@ -203,7 +211,9 @@ export class SubscriptionsService {
       }
 
       subscription.autoRenew = enabled;
-      subscription.cancelAtPeriodEnd = enabled ? false : subscription.cancelAtPeriodEnd;
+      subscription.cancelAtPeriodEnd = enabled
+        ? false
+        : subscription.cancelAtPeriodEnd;
       user.subscription = subscription as never;
       await user.save({ session });
 
@@ -248,7 +258,7 @@ export class SubscriptionsService {
   async getMySubscriptionHistory(
     userId: string,
     query: SubscriptionHistoryQueryDto,
-  ): Promise<PaginatedResponseDto<Record<string, unknown>>> {
+  ): Promise<PaginatedResponseDto<SubscriptionHistoryItemDto>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
@@ -260,28 +270,66 @@ export class SubscriptionsService {
     const [items, total] = await Promise.all([
       this.transactionModel
         .find(filter)
+        .select({
+          _id: 1,
+          type: 1,
+          status: 1,
+          amount: 1,
+          balanceBefore: 1,
+          balanceAfter: 1,
+          metadata: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
+        .lean<
+          Array<{
+            _id: Types.ObjectId;
+            type: TransactionType;
+            status: TransactionStatus;
+            amount: number;
+            balanceBefore: number;
+            balanceAfter: number;
+            metadata?: Record<string, unknown>;
+            createdAt?: Date;
+            updatedAt?: Date;
+          }>
+        >()
         .exec(),
       this.transactionModel.countDocuments(filter),
     ]);
 
-    const mapped = items.map((item) => {
-      const plain = item.toObject({ virtuals: true }) as Record<
-        string,
-        unknown
-      >;
+    const mapped = items.map((item): SubscriptionHistoryItemDto => {
       const metadata =
-        plain.metadata && typeof plain.metadata === 'object'
-          ? (plain.metadata as Record<string, unknown>)
-          : {};
+        item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+      const billingCycle =
+        metadata.billingCycle === BillingCycle.QUARTERLY ||
+        metadata.billingCycle === BillingCycle.YEARLY
+          ? metadata.billingCycle
+          : BillingCycle.MONTHLY;
+      const totalCostCoins =
+        typeof metadata.totalCostCoins === 'number'
+          ? metadata.totalCostCoins
+          : null;
+      const months =
+        typeof metadata.months === 'number' ? metadata.months : null;
       return {
-        ...plain,
-        planCode: metadata.planCode ?? 'unknown',
-        billingCycle: metadata.billingCycle ?? BillingCycle.MONTHLY,
-        totalCostCoins: metadata.totalCostCoins ?? null,
-        months: metadata.months ?? null,
+        id: item._id.toString(),
+        type: item.type,
+        status: item.status,
+        amount: item.amount,
+        balanceBefore: item.balanceBefore,
+        balanceAfter: item.balanceAfter,
+        metadata,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        planCode:
+          typeof metadata.planCode === 'string' ? metadata.planCode : 'unknown',
+        billingCycle,
+        totalCostCoins,
+        months,
       };
     });
 
@@ -340,72 +388,146 @@ export class SubscriptionsService {
 
     this.renewalProcessing = true;
     const now = new Date();
+    const lookahead = new Date(
+      now.getTime() + this.renewalLookaheadDays * 24 * 60 * 60 * 1000,
+    );
+    let cursor: Types.ObjectId | undefined;
 
     try {
-      const candidates = await this.userModel
-        .find({
-          'subscription.planCode': { $ne: SubscriptionPlanCode.FREE },
-        })
-        .select({ _id: 1, email: 1, subscription: 1 })
-        .exec();
+      while (true) {
+        const query = this.userModel
+          .find(this.buildRenewalCandidateFilter(now, lookahead, cursor))
+          .sort({ _id: 1 })
+          .limit(this.renewalBatchSize)
+          .select({ _id: 1, email: 1, subscription: 1 });
+        const candidates = await query.exec();
 
-      for (const candidate of candidates) {
-        try {
-          const current = normalizeSubscription(candidate.subscription, now);
-          let next = current;
-          let changed = false;
+        if (candidates.length === 0) {
+          break;
+        }
 
-          if (shouldSendReminder(next, now, 7)) {
-            await this.sendRenewalReminder(candidate.id, candidate.email, next, 7);
-            next = markReminderSent(next, 7, now);
-            changed = true;
-          }
-
-          if (shouldSendReminder(next, now, 3)) {
-            await this.sendRenewalReminder(candidate.id, candidate.email, next, 3);
-            next = markReminderSent(next, 3, now);
-            changed = true;
-          }
-
-          const expiredAt =
-            next.expiresAt &&
-            now.getTime() >= new Date(next.expiresAt).getTime();
-          const graceExpired =
-            next.gracePeriodEndsAt &&
-            now.getTime() >= new Date(next.gracePeriodEndsAt).getTime();
-
-          if (expiredAt && (next.cancelAtPeriodEnd || !next.autoRenew)) {
-            await this.notifySubscriptionExpired(candidate.id, candidate.email, next);
-            next = createDefaultSubscription(now);
-            changed = true;
-          } else if (expiredAt && next.autoRenew) {
-            const renewResult = await this.tryAutoRenew(candidate.id, candidate.email, next, now);
-            next = renewResult.subscription;
-            changed = renewResult.changed || changed;
-          } else if (
-            next.renewalFailedAt &&
-            next.gracePeriodEndsAt &&
-            graceExpired
-          ) {
-            await this.notifySubscriptionExpired(candidate.id, candidate.email, next);
-            next = createDefaultSubscription(now);
-            changed = true;
-          }
-
-          if (changed) {
-            candidate.subscription = next as never;
-            await candidate.save();
-          }
-        } catch (error) {
-          this.logger.error(
-            `Failed processing auto renew for user=${candidate.id}: ${
-              error instanceof Error ? error.message : 'Unknown error'
-            }`,
+        for (
+          let index = 0;
+          index < candidates.length;
+          index += this.renewalConcurrency
+        ) {
+          const chunk = candidates.slice(
+            index,
+            index + this.renewalConcurrency,
+          );
+          await Promise.all(
+            chunk.map((candidate) =>
+              this.processRenewalCandidate(candidate, now),
+            ),
           );
         }
+
+        const last = candidates[candidates.length - 1];
+        cursor = last?._id;
       }
     } finally {
       this.renewalProcessing = false;
+    }
+  }
+
+  private buildRenewalCandidateFilter(
+    now: Date,
+    lookahead: Date,
+    cursor?: Types.ObjectId,
+  ): Record<string, unknown> {
+    const filter: Record<string, unknown> = {
+      'subscription.planCode': { $ne: SubscriptionPlanCode.FREE },
+      $or: [
+        {
+          'subscription.expiresAt': {
+            $exists: true,
+            $lte: lookahead,
+          },
+        },
+        {
+          'subscription.gracePeriodEndsAt': {
+            $exists: true,
+            $lte: now,
+          },
+        },
+      ],
+    };
+
+    if (cursor) {
+      filter._id = { $gt: cursor };
+    }
+
+    return filter;
+  }
+
+  private async processRenewalCandidate(
+    candidate: Pick<UserDocument, 'id' | 'email' | 'subscription' | 'save'>,
+    now: Date,
+  ): Promise<void> {
+    try {
+      const current = normalizeSubscription(candidate.subscription, now);
+      let next = current;
+      let changed = false;
+
+      if (shouldSendReminder(next, now, 7)) {
+        await this.sendRenewalReminder(candidate.id, candidate.email, next, 7);
+        next = markReminderSent(next, 7, now);
+        changed = true;
+      }
+
+      if (shouldSendReminder(next, now, 3)) {
+        await this.sendRenewalReminder(candidate.id, candidate.email, next, 3);
+        next = markReminderSent(next, 3, now);
+        changed = true;
+      }
+
+      const expiredAt =
+        next.expiresAt && now.getTime() >= new Date(next.expiresAt).getTime();
+      const graceExpired =
+        next.gracePeriodEndsAt &&
+        now.getTime() >= new Date(next.gracePeriodEndsAt).getTime();
+
+      if (expiredAt && (next.cancelAtPeriodEnd || !next.autoRenew)) {
+        await this.notifySubscriptionExpired(
+          candidate.id,
+          candidate.email,
+          next,
+        );
+        next = createDefaultSubscription(now);
+        changed = true;
+      } else if (expiredAt && next.autoRenew) {
+        const renewResult = await this.tryAutoRenew(
+          candidate.id,
+          candidate.email,
+          next,
+          now,
+        );
+        next = renewResult.subscription;
+        changed = renewResult.changed || changed;
+      } else if (
+        next.renewalFailedAt &&
+        next.gracePeriodEndsAt &&
+        graceExpired
+      ) {
+        await this.notifySubscriptionExpired(
+          candidate.id,
+          candidate.email,
+          next,
+        );
+        next = createDefaultSubscription(now);
+        changed = true;
+      }
+
+      if (changed) {
+        candidate.subscription = next as never;
+        await candidate.save();
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed processing auto renew for user=${candidate.id}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
     }
   }
 
@@ -439,6 +561,7 @@ export class SubscriptionsService {
         billingCycle: subscription.billingCycle,
         emailOverride: email,
       });
+      this.opsAlertService?.recordRenewalResult({ success: true });
       return { changed: true, subscription: renewed };
     }
 
@@ -478,6 +601,7 @@ export class SubscriptionsService {
         billingCycle: subscription.billingCycle,
         emailOverride: email,
       });
+      this.opsAlertService?.recordRenewalResult({ success: true });
       return { changed: true, subscription: renewed };
     } catch (error) {
       const message =
@@ -485,6 +609,10 @@ export class SubscriptionsService {
       const insufficient = message.toLowerCase().includes('insufficient');
 
       if (!insufficient) {
+        this.opsAlertService?.recordRenewalResult({
+          success: false,
+          reason: message,
+        });
         throw error;
       }
 
@@ -501,14 +629,25 @@ export class SubscriptionsService {
         now,
         this.getGracePeriodDays(),
       );
-      await this.notifySubscriptionRenewalFailed(userId, email, failed, totalCostCoins);
+      await this.notifySubscriptionRenewalFailed(
+        userId,
+        email,
+        failed,
+        totalCostCoins,
+      );
+      this.opsAlertService?.recordRenewalResult({
+        success: false,
+        reason: 'insufficient_wallet_balance',
+      });
 
       return { changed: true, subscription: failed };
     }
   }
 
   private getGracePeriodDays(): number {
-    const configured = this.configService.get<number>('SUBSCRIPTION_GRACE_DAYS');
+    const configured = this.configService.get<number>(
+      'SUBSCRIPTION_GRACE_DAYS',
+    );
     if (!configured || !Number.isFinite(configured)) {
       return 3;
     }
@@ -529,22 +668,17 @@ export class SubscriptionsService {
 
     await this.notificationsService.createSubscriptionNotification({
       userId,
+      email,
       type: NotificationType.SUBSCRIPTION_REMINDER,
       title: `Subscription expires in ${daysRemaining} day(s)`,
       message: `Your ${subscription.planName} plan will expire soon. Keep at least ${requiredCoins} coins for auto-renew.`,
       metadata: {
+        planName: subscription.planName,
         daysRemaining,
         requiredCoins,
         expiresAt,
         planCode: subscription.planCode,
       },
-    });
-
-    await this.mailService.sendSubscriptionReminder(email, {
-      planName: subscription.planName,
-      expiresAt,
-      daysRemaining,
-      requiredCoins,
     });
   }
 
@@ -563,22 +697,17 @@ export class SubscriptionsService {
 
     await this.notificationsService.createSubscriptionNotification({
       userId,
+      email: user.email,
       type: NotificationType.SUBSCRIPTION_RENEWED,
       title: `Subscription renewed: ${subscription.planName}`,
       message: `${subscription.planName} has been renewed (${input.billingCycle}). Charged ${input.chargedCoins} coins.`,
       metadata: {
+        planName: subscription.planName,
         planCode: subscription.planCode,
         billingCycle: input.billingCycle,
         chargedCoins: input.chargedCoins,
         nextRenewalAt: subscription.nextRenewalAt,
       },
-    });
-
-    await this.mailService.sendSubscriptionRenewed(user.email, {
-      planName: subscription.planName,
-      billingCycle: input.billingCycle,
-      nextRenewalAt: subscription.nextRenewalAt ?? new Date(),
-      chargedCoins: input.chargedCoins,
     });
   }
 
@@ -592,20 +721,16 @@ export class SubscriptionsService {
 
     await this.notificationsService.createSubscriptionNotification({
       userId,
+      email,
       type: NotificationType.SUBSCRIPTION_FAILED,
       title: `Auto-renew failed for ${subscription.planName}`,
       message: `Insufficient wallet balance. Top up ${requiredCoins} coins before ${graceEnds.toISOString()}.`,
       metadata: {
+        planName: subscription.planName,
         planCode: subscription.planCode,
         requiredCoins,
         gracePeriodEndsAt: graceEnds,
       },
-    });
-
-    await this.mailService.sendSubscriptionRenewalFailed(email, {
-      planName: subscription.planName,
-      requiredCoins,
-      gracePeriodEndsAt: graceEnds,
     });
   }
 
@@ -618,18 +743,15 @@ export class SubscriptionsService {
 
     await this.notificationsService.createSubscriptionNotification({
       userId,
+      email,
       type: NotificationType.SUBSCRIPTION_EXPIRED,
       title: `Subscription expired: ${subscription.planName}`,
       message: `Your ${subscription.planName} plan has expired and account is now on Free.`,
       metadata: {
+        previousPlanName: subscription.planName,
         previousPlanCode: subscription.planCode,
         expiredAt,
       },
-    });
-
-    await this.mailService.sendSubscriptionExpired(email, {
-      previousPlanName: subscription.planName,
-      expiredAt,
     });
   }
 
@@ -670,81 +792,11 @@ export class SubscriptionsService {
     callback: (session: ClientSession) => Promise<T>,
     session?: ClientSession,
   ): Promise<T> {
-    if (session) {
-      return callback(session);
-    }
-
-    const startedSession = await this.connection.startSession();
-    try {
-      const shouldUseTransactions = await this.canUseTransactions();
-      if (shouldUseTransactions) {
-        try {
-          let result!: T;
-          await startedSession.withTransaction(async () => {
-            result = await callback(startedSession);
-          });
-          return result;
-        } catch (error) {
-          if (!this.isTransactionUnsupportedError(error)) {
-            throw error;
-          }
-
-          this.transactionsSupported = false;
-        }
-      }
-
-      return await callback(startedSession);
-    } finally {
-      await startedSession.endSession();
-    }
-  }
-
-  private async canUseTransactions(): Promise<boolean> {
-    if (this.transactionCapabilityChecked) {
-      return this.transactionsSupported;
-    }
-
-    try {
-      const db = this.connection.db;
-      if (!db) {
-        throw new Error('MongoDB connection is not ready');
-      }
-
-      const hello = await db.admin().command({ hello: 1 });
-      const isReplicaSetMember = Boolean(hello?.setName);
-      const isMongos = hello?.msg === 'isdbgrid';
-      this.transactionsSupported = isReplicaSetMember || isMongos;
-    } catch {
-      this.transactionsSupported = true;
-    } finally {
-      this.transactionCapabilityChecked = true;
-    }
-
-    return this.transactionsSupported;
-  }
-
-  private isTransactionUnsupportedError(error: unknown): boolean {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === 'string'
-          ? error
-          : '';
-
-    if (
-      message.includes(
-        'Transaction numbers are only allowed on a replica set member or mongos',
-      )
-    ) {
-      return true;
-    }
-
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? (error as { code?: unknown }).code
-        : undefined;
-
-    return code === 20;
+    return this.mongoTransactionService.executeInTransaction(
+      this.connection,
+      callback,
+      session,
+    );
   }
 
   private async findUserOrFail(
@@ -792,3 +844,4 @@ export class SubscriptionsService {
     return Math.round(amountCoins * coinToVndRate);
   }
 }
+

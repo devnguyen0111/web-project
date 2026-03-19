@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { MailModule } from '../mail/mail.module';
+import { AlertsModule } from '../alerts/alerts.module';
+import { MongoTransactionService } from '../common/services/mongo-transaction.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { WalletModule } from '../wallet/wallet.module';
@@ -10,7 +11,7 @@ import { SubscriptionsService } from './subscriptions.service';
 
 @Module({
   imports: [
-    MailModule,
+    AlertsModule,
     NotificationsModule,
     WalletModule,
     MongooseModule.forFeature([
@@ -19,7 +20,9 @@ import { SubscriptionsService } from './subscriptions.service';
     ]),
   ],
   controllers: [SubscriptionsController],
-  providers: [SubscriptionsService],
+  providers: [SubscriptionsService, MongoTransactionService],
   exports: [SubscriptionsService],
 })
 export class SubscriptionsModule {}
+
+

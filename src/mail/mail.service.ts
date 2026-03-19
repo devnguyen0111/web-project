@@ -163,6 +163,28 @@ export class MailService {
     await this.sendMail({ to, subject, text, html });
   }
 
+  async sendNotificationAlert(
+    to: string,
+    payload: {
+      title: string;
+      message: string;
+      createdAt?: Date;
+    },
+  ): Promise<void> {
+    const subject = `[ALERT] ${payload.title}`;
+    const createdAt = payload.createdAt ?? new Date();
+    const text =
+      `${payload.message}\n` +
+      `Created at: ${createdAt.toISOString()}`;
+    const html = `
+      <p><strong>${payload.title}</strong></p>
+      <p>${payload.message}</p>
+      <p>Created at: <strong>${createdAt.toISOString()}</strong></p>
+    `;
+
+    await this.sendMail({ to, subject, text, html });
+  }
+
   private renderTemplate(
     templateName: MailTemplateName,
     context: MailTemplateContext,

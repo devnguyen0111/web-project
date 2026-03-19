@@ -1,7 +1,7 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
-import { MailService } from '../mail/mail.service';
+import { MongoTransactionService } from '../common/services/mongo-transaction.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { User } from '../users/schemas/user.schema';
 import { Transaction } from '../wallet/schemas/transaction.schema';
@@ -44,12 +44,7 @@ describe('SubscriptionsService', () => {
   let notificationsService: {
     createSubscriptionNotification: jest.Mock;
   };
-  let mailService: {
-    sendSubscriptionReminder: jest.Mock;
-    sendSubscriptionRenewed: jest.Mock;
-    sendSubscriptionRenewalFailed: jest.Mock;
-    sendSubscriptionExpired: jest.Mock;
-  };
+  let mongoTransactionService: MongoTransactionService;
 
   beforeEach(() => {
     userModel = {
@@ -83,12 +78,9 @@ describe('SubscriptionsService', () => {
     notificationsService = {
       createSubscriptionNotification: jest.fn().mockResolvedValue(undefined),
     };
-    mailService = {
-      sendSubscriptionReminder: jest.fn().mockResolvedValue(undefined),
-      sendSubscriptionRenewed: jest.fn().mockResolvedValue(undefined),
-      sendSubscriptionRenewalFailed: jest.fn().mockResolvedValue(undefined),
-      sendSubscriptionExpired: jest.fn().mockResolvedValue(undefined),
-    };
+    mongoTransactionService = new MongoTransactionService(
+      configService as unknown as ConfigService,
+    );
 
     service = new SubscriptionsService(
       userModel as unknown as Model<User>,
@@ -96,8 +88,8 @@ describe('SubscriptionsService', () => {
       connection as never,
       walletService as unknown as WalletService,
       configService as unknown as ConfigService,
+      mongoTransactionService,
       notificationsService as unknown as NotificationsService,
-      mailService as unknown as MailService,
     );
   });
 

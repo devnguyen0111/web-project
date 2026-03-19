@@ -10,15 +10,19 @@ import {
 } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/decorators/public.decorator';
+import { DepositService } from './deposit.service';
+import { PaymentReturnService } from './payment-return.service';
 import { ExternalPaymentProvider } from './schemas/transaction.schema';
-import { WalletService } from './wallet.service';
 
 @ApiTags('payment')
 @Controller('payment')
 export class PaymentController {
   private readonly logger = new Logger(PaymentController.name);
 
-  constructor(private readonly walletService: WalletService) {}
+  constructor(
+    private readonly depositService: DepositService,
+    private readonly paymentReturnService: PaymentReturnService,
+  ) {}
 
   @Public()
   @Post('payos/webhook')
@@ -30,7 +34,7 @@ export class PaymentController {
     @Headers('x-payos-signature') signature?: string,
   ) {
     try {
-      return await this.walletService.handlePayosWebhook(body, signature);
+      return await this.depositService.handlePayosWebhook(body, signature);
     } catch (error) {
       this.logger.error(
         `PayOS webhook handling error: ${
@@ -51,7 +55,7 @@ export class PaymentController {
     @Headers('x-payment-signature') signature?: string,
   ) {
     try {
-      return await this.walletService.handleProviderCallback(
+      return await this.depositService.handleProviderCallback(
         ExternalPaymentProvider.PAYOS,
         body,
         signature,
@@ -71,9 +75,17 @@ export class PaymentController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Sync PayOS return/cancel status' })
   @ApiBody({ schema: { type: 'object' } })
-  async payosReturnSync(@Body() body: Record<string, unknown>) {
+  async payosReturnSync(
+    @Body() body: Record<string, unknown>,
+    @Headers('x-payment-signature') paymentSignature?: string,
+    @Headers('x-payos-signature') payosSignature?: string,
+  ) {
     try {
-      return await this.walletService.syncPayosReturnStatus(body);
+      const signature = paymentSignature || payosSignature;
+      return await this.paymentReturnService.syncPayosReturnStatus(
+        body,
+        signature,
+      );
     } catch (error) {
       this.logger.error(
         `PayOS return sync error: ${
@@ -94,6 +106,6 @@ export class PaymentController {
   @ApiQuery({ name: 'cancel', required: false })
   @ApiQuery({ name: 'code', required: false })
   async getPayosReturnStatus(@Query() query: Record<string, unknown>) {
-    return this.walletService.getPayosReturnStatus(query);
+    return this.paymentReturnService.getPayosReturnStatus(query);
   }
 }

@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
+import { MongoTransactionService } from '../common/services/mongo-transaction.service';
+import { DepositService } from './deposit.service';
+import { PaymentReturnService } from './payment-return.service';
 import { WalletService } from './wallet.service';
 import { User } from '../users/schemas/user.schema';
 import { Transaction, TransactionType } from './schemas/transaction.schema';
@@ -51,6 +54,9 @@ describe('WalletService', () => {
       admin: jest.Mock;
     };
   };
+  let mongoTransactionService: MongoTransactionService;
+  let depositService: DepositService;
+  let paymentReturnService: PaymentReturnService;
 
   beforeEach(() => {
     userModel = {
@@ -90,13 +96,32 @@ describe('WalletService', () => {
     connection = {
       startSession: jest.fn(),
     };
+    mongoTransactionService = new MongoTransactionService(
+      configService as unknown as ConfigService,
+    );
+    depositService = new DepositService(
+      userModel as unknown as Model<User>,
+      transactionModel as unknown as Model<Transaction>,
+      connection as never,
+      configService as unknown as ConfigService,
+      paymentProviderManager as unknown as PaymentProviderManager,
+      mongoTransactionService,
+    );
+    paymentReturnService = new PaymentReturnService(
+      transactionModel as unknown as Model<Transaction>,
+      connection as never,
+      paymentProviderManager as unknown as PaymentProviderManager,
+      mongoTransactionService,
+    );
 
     service = new WalletService(
       userModel as unknown as Model<User>,
       transactionModel as unknown as Model<Transaction>,
       connection as never,
       configService as unknown as ConfigService,
-      paymentProviderManager as unknown as PaymentProviderManager,
+      mongoTransactionService,
+      depositService,
+      paymentReturnService,
     );
   });
 
@@ -601,6 +626,9 @@ describe('WalletService', () => {
       session: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(transaction),
     });
+    paymentProviderManager.verifyCallback.mockReturnValue({
+      signatureValid: true,
+    });
 
     const result = await service.syncPayosReturnStatus({
       orderCode: '1773857686372',
@@ -609,7 +637,7 @@ describe('WalletService', () => {
       cancel: 'true',
       code: '00',
       id: 'f60d5607d7d04b29842ea25e16b6a0b5',
-    });
+    }, 'valid-signature');
 
     expect(result.code).toBe('00');
     expect(transaction.status).toBe('failed');
@@ -637,12 +665,15 @@ describe('WalletService', () => {
       session: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(transaction),
     });
+    paymentProviderManager.verifyCallback.mockReturnValue({
+      signatureValid: true,
+    });
 
     const result = await service.syncPayosReturnStatus({
       orderCode: '1773857686372',
       status: 'CANCELLED',
       cancel: 'true',
-    });
+    }, 'valid-signature');
 
     expect(result.code).toBe('00');
     expect(transaction.status).toBe('completed');

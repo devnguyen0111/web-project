@@ -3,14 +3,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { NotificationQueryDto } from './dto/notification-query.dto';
+import { NotificationResponseDto } from './dto/notification-response.dto';
 import {
   Notification,
   NotificationCategory,
   NotificationDocument,
   NotificationType,
 } from './schemas/notification.schema';
-
-type NotificationPayload = Record<string, unknown>;
 
 @Injectable()
 export class NotificationsService {
@@ -21,6 +20,7 @@ export class NotificationsService {
 
   async createSubscriptionNotification(input: {
     userId: string;
+    email?: string;
     type: NotificationType;
     title: string;
     message: string;
@@ -43,7 +43,7 @@ export class NotificationsService {
   async listMine(
     userId: string,
     query: NotificationQueryDto,
-  ): Promise<PaginatedResponseDto<NotificationPayload>> {
+  ): Promise<PaginatedResponseDto<NotificationResponseDto>> {
     const skip = (query.page - 1) * query.limit;
     const filter = { userId: new Types.ObjectId(userId) };
     const [items, total] = await Promise.all([
@@ -57,7 +57,7 @@ export class NotificationsService {
     ]);
 
     return new PaginatedResponseDto(
-      items.map((item) => item.toObject({ virtuals: true }) as NotificationPayload),
+      items.map((item) => this.toNotificationResponse(item)),
       total,
       query.page,
       query.limit,
@@ -75,7 +75,7 @@ export class NotificationsService {
   async markRead(
     userId: string,
     id: string,
-  ): Promise<NotificationPayload> {
+  ): Promise<NotificationResponseDto> {
     const notification = await this.notificationModel
       .findOne({
         _id: new Types.ObjectId(id),
@@ -91,7 +91,7 @@ export class NotificationsService {
       await notification.save();
     }
 
-    return notification.toObject({ virtuals: true }) as NotificationPayload;
+    return this.toNotificationResponse(notification);
   }
 
   async markAllRead(userId: string): Promise<{ updated: number }> {
@@ -104,5 +104,22 @@ export class NotificationsService {
     );
 
     return { updated: result.modifiedCount ?? 0 };
+  }
+
+  private toNotificationResponse(
+    notification: NotificationDocument,
+  ): NotificationResponseDto {
+    return {
+      id: notification.id,
+      userId: notification.userId.toString(),
+      category: notification.category,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      readAt: notification.readAt,
+      metadata: notification.metadata,
+      createdAt: notification.createdAt,
+      updatedAt: notification.updatedAt,
+    };
   }
 }
