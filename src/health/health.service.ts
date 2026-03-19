@@ -38,7 +38,9 @@ export class HealthService {
       appConfig: this.checkAppConfig(),
     };
 
-    const status: HealthStatus = Object.values(checks).every((item) => item === 'ok')
+    const status: HealthStatus = Object.values(checks).every(
+      (item) => item === 'ok',
+    )
       ? 'ok'
       : 'degraded';
 
@@ -97,7 +99,9 @@ export class HealthService {
 
   private checkAppConfig(): HealthStatus {
     const mongoUri = this.configService.get<string>('database.uri')?.trim();
-    const jwtAccessSecret = this.configService.get<string>('jwt.accessSecret')?.trim();
+    const jwtAccessSecret = this.configService
+      .get<string>('jwt.accessSecret')
+      ?.trim();
     const jwtRefreshSecret = this.configService
       .get<string>('jwt.refreshSecret')
       ?.trim();

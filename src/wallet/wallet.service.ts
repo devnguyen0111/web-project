@@ -13,10 +13,7 @@ import { User, UserDocument } from '../users/schemas/user.schema';
 import { AdminAdjustWalletDto } from './dto/admin-adjust-wallet.dto';
 import { CreateDepositDto } from './dto/create-deposit.dto';
 import { WalletTransactionQueryDto } from './dto/wallet-transaction-query.dto';
-import {
-  DepositRequestResponse,
-  DepositService,
-} from './deposit.service';
+import { DepositRequestResponse, DepositService } from './deposit.service';
 import {
   PayosReturnStatusPayload,
   PayosReturnSyncPayload,
@@ -339,7 +336,11 @@ export class WalletService {
     transactionId: string,
     reason?: string,
   ): Promise<TransactionDocument> {
-    return this.depositService.cancelDepositRequest(userId, transactionId, reason);
+    return this.depositService.cancelDepositRequest(
+      userId,
+      transactionId,
+      reason,
+    );
   }
 
   async createDepositRequest(
@@ -379,7 +380,11 @@ export class WalletService {
     payload: Record<string, unknown>,
     signature?: string,
   ): Promise<TransactionDocument> {
-    return this.depositService.handleProviderCallback(provider, payload, signature);
+    return this.depositService.handleProviderCallback(
+      provider,
+      payload,
+      signature,
+    );
   }
 
   async handlePayosWebhook(
