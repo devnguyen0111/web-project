@@ -23,6 +23,7 @@ import { MinioModule } from './minio/minio.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { WalletModule } from './wallet/wallet.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { StoreModule } from './store/store.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     SubscriptionsModule,
     WalletModule,
     NotificationsModule,
+    StoreModule,
     UsersModule,
     AuthModule,
     BlogModule,

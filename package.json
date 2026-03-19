@@ -22,7 +22,8 @@
     "migrate:post-content-to-blocks": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-post-content-to-blocks.ts",
     "migrate:wallet-transaction-units": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-wallet-transaction-units.ts",
     "migrate:subscription-tier-v2": "ts-node -r tsconfig-paths/register src/database/seeders/migrate-subscription-tier-v2.ts",
-    "seed:technology-posts": "ts-node -r tsconfig-paths/register src/database/seeders/seed-technology-posts.ts"
+    "seed:technology-posts": "ts-node -r tsconfig-paths/register src/database/seeders/seed-technology-posts.ts",
+    "seed:products": "ts-node -r tsconfig-paths/register src/database/seeders/seed-products.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

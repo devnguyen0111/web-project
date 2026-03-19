@@ -156,6 +156,13 @@ Default URLs:
 - `GET /wallet/deposit-requests/:id`
 - `POST /wallet/deposit/:id/cancel`
 - `POST /wallet/deposit-requests/:id/cancel`
+- `POST /orders`
+- `GET /orders/me`
+- `GET /orders/:id`
+- `POST /orders/:id/cancel`
+- `POST /orders/:id/quote/accept`
+- `POST /orders/:id/quote/reject`
+- `GET /orders/:id/download`
 - `GET /subscriptions/me`
 - `POST /subscriptions/me/purchase`
 - `POST /subscriptions/me/renew`
@@ -189,6 +196,18 @@ Default URLs:
 - `PATCH /comments/:id/hide`
 - `GET /admin/wallet/stats`
 - `POST /admin/wallet/adjust`
+- `GET /products/me`
+- `POST /products`
+- `PATCH /products/:id`
+- `POST /products/:id/submit-review`
+- `POST /products/:id/publish`
+- `POST /products/:id/reject`
+- `DELETE /products/:id`
+- `GET /store/orders`
+- `POST /store/orders/:id/quote`
+- `PATCH /store/orders/:id/status`
+- `GET /store/dashboard`
+- `GET /store/dashboard/revenue`
 
 Auth uses bearer JWT. Public routes do not require a token.
 

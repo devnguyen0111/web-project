@@ -83,6 +83,18 @@ export class MinioService implements OnModuleInit {
     await this.minioClient.removeObject(bucketName, objectName);
   }
 
+  async getPresignedGetUrl(
+    bucketName: string,
+    objectName: string,
+    expiresInSeconds = 60 * 60,
+  ): Promise<string> {
+    return this.minioClient.presignedGetObject(
+      bucketName,
+      objectName,
+      expiresInSeconds,
+    );
+  }
+
   async removeObjectByUrl(bucketName: string, fileUrl: string): Promise<void> {
     const objectName = this.extractObjectNameFromUrl(bucketName, fileUrl);
     if (!objectName) {

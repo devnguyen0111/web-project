@@ -704,6 +704,7 @@ describe('WalletService', () => {
         paymentLinkId: 'f60d5607d7d04b29842ea25e16b6a0b5',
       },
       metadata: {},
+      failureReason: undefined,
       save: jest.fn().mockResolvedValue(undefined),
     };
     transactionModel.findById.mockReturnValue({
