@@ -1355,7 +1355,7 @@ server/
 
 ### Phase 5 — Tickets + Notifications + Mail (6-7 days)
 
-**Goal:** Support system, realtime notifications, email
+**Goal:** Email + notifications foundation (tickets/realtime remain pending)
 
 **Tasks:**
 
@@ -1363,12 +1363,12 @@ server/
 - [ ] Ticket admin: assign, internal notes, escalate
 - [ ] Satisfaction rating
 - [ ] Mail module: templates (HBS), async send via Bull queue
-- [ ] Email: verify, reset password, order confirmed, post approved
-- [ ] Notifications module: create, list, mark read
+- [x] Email: verify, reset password, subscription reminders/renewal alerts
+- [x] Notifications module: create, list, mark read (subscription scope)
 - [ ] WebSocket gateway: realtime push
 - [ ] Integrate notifications into old modules (blog, store, wallet)
 
-**Result:** Support system + realtime notification + email.
+**Result:** Partial delivery: email + subscription notification feed done; tickets/realtime still pending.
 
 ---
 
@@ -1384,9 +1384,9 @@ server/
 - [ ] Leaderboard: pre-computed snapshots (cron)
 - [ ] Referral system: code, track, reward
 - [ ] Social: follow/unfollow, profile page data
-- [ ] Subscription module: plans, purchase, cancel, perks
+- [x] Subscription module: plans, purchase, cancel/auto-renew, history (quota-first)
 - [ ] Subscription perks: bonus coin, discount, exclusive content
-- [ ] Subscription expiry cron
+- [x] Subscription auto-renew/expiry cron with reminders + grace period
 - [ ] Wiki/Knowledge base module
 - [ ] 2FA: TOTP enable/verify/disable, backup codes
 - [ ] Admin dashboard: stats, revenue, user growth, audit logs
@@ -1395,7 +1395,7 @@ server/
 - [ ] Security review
 - [ ] Complete API documentation
 
-**Result:** Complete feature, ready to connect to frontend.
+**Result:** In progress; only subscription core is delivered in this phase scope.
 
 ---
 
@@ -1404,7 +1404,7 @@ server/
 ```
 Phase 1 ████████░░░░░░░░░░░░░░░░░░░░░░ Week 1-2 (Foundation)
 Phase 2 ████████████████░░░░░░░░░░░░░░ Week 2-3 (Blog) ✅
-Phase 3 ░░░░░░░░░░░░░░████████░░░░░░░░ Week 4-5 (Wallet) ▶
+Phase 3 ░░░░░░░░░░░░░░████████░░░░░░░░ Week 4-5 (Wallet) ✅
 Phase 4 ░░░░░░░░░░░░░░░░░░░░░░████████ Week 5-7 (Store)
 Phase 5 ░░░░░░░░░░░░░░░░░░░░░░░░░░████ Week 7-8 (Support)
 Phase 6 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██ Week 9-11 (Polish)
