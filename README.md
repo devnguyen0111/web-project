@@ -1,6 +1,6 @@
 # Web Project API
 
-NestJS backend for auth, users, blog, wallet, subscriptions, notifications, and PayOS-backed deposits on MongoDB. It also uses MinIO or another S3-compatible store, SMTP email, and Swagger.
+NestJS backend for auth, users, blog, wallet, subscriptions, notifications, store MVP (products + orders), cart checkout, and PayOS-backed deposits on MongoDB. It also uses MinIO or another S3-compatible store, SMTP email, and Swagger.
 
 ## What Is Implemented
 
@@ -10,7 +10,21 @@ NestJS backend for auth, users, blog, wallet, subscriptions, notifications, and 
 - Wallet: balance, transactions, deposit requests, PayOS webhook/return callbacks, admin adjustments.
 - Subscriptions: canonical `free`, `pro`, `vip` plans; monthly, quarterly, yearly billing; wallet-coin purchase; auto-renew with grace period.
 - Notifications: minimal in-app feed for subscription events.
+- Store MVP: products CRUD/listing, direct order creation (`buy-now`), and order lookup.
+- Store operations MVP: store order list and dashboard summary for staff/admin.
+- Reviews MVP: product/store review create/list and staff/admin reply.
+- Cart MVP: get/add/update/remove/clear/checkout with checkout revalidation.
+- Health + Ops alerting: liveness/readiness endpoints with alert hooks for readiness, webhook, and renewal outcomes.
 - Infra: MongoDB, MinIO bucket bootstrap, SMTP mail preview or delivery, global validation/response/error handling, hourly scheduler for subscription renewal.
+
+## Planned (Not Implemented Yet)
+
+- Tickets module and admin ticket flows.
+- Wiki/knowledge-base module.
+- Gamification/social modules.
+- Store quote/delivery and advanced fulfillment flows.
+- Admin dashboard/audit-log endpoints and `GET /admin/wallet/stats`.
+- WebSocket/Bull realtime and queue-based flows.
 
 ## Current Subscription Behavior
 
@@ -110,6 +124,8 @@ Default URLs:
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
 - `POST /auth/refresh`
+- `GET /health/live`
+- `GET /health/ready`
 - `GET /posts`
 - `GET /posts/:slug`
 - `GET /posts/:postId/poll/results`
@@ -117,6 +133,8 @@ Default URLs:
 - `GET /categories`
 - `GET /tags`
 - `GET /tags/:slug/posts`
+- `GET /products`
+- `GET /products/:identifier` (id or slug)
 - `GET /subscriptions/plans`
 - `POST /payment/payos/webhook`
 - `POST /payment/callback/payos`
@@ -166,6 +184,19 @@ Default URLs:
 - `GET /notifications/me/unread-count`
 - `POST /notifications/me/:id/read`
 - `POST /notifications/me/read-all`
+- `POST /orders`
+- `GET /orders/me`
+- `GET /orders/:id`
+- `GET /cart`
+- `POST /cart/items`
+- `PATCH /cart/items/:itemId`
+- `DELETE /cart/items/:itemId`
+- `DELETE /cart`
+- `POST /cart/checkout`
+- `GET /products/:productId/reviews`
+- `POST /products/:productId/reviews`
+- `GET /store/reviews`
+- `POST /store/reviews`
 
 ### Staff/Admin
 
@@ -187,7 +218,13 @@ Default URLs:
 - `PATCH /moderation/posts/:id/approve`
 - `PATCH /moderation/posts/:id/reject`
 - `PATCH /comments/:id/hide`
-- `GET /admin/wallet/stats`
+- `GET /products/me`
+- `POST /products`
+- `PATCH /products/:id`
+- `DELETE /products/:id`
+- `PATCH /reviews/:id/reply`
+- `GET /store/orders`
+- `GET /store/dashboard`
 - `POST /admin/wallet/adjust`
 
 Auth uses bearer JWT. Public routes do not require a token.
@@ -203,12 +240,9 @@ Auth uses bearer JWT. Public routes do not require a token.
 
 ## Validation
 
-Verified on `2026-03-19`:
+Verified on `2026-03-24`:
 
 ```bash
 npm run build
 npm test -- --runInBand
-npm run test:e2e -- --runInBand --testTimeout=30000
 ```
-
-The default `npm run test:e2e` can still hit Jest's 5s timeout on longer auth/blog flows, so use the longer timeout command above.

@@ -25,8 +25,10 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('DN Web Project API')
-    .setDescription('Phase 1-2 endpoints for auth, users, and blog system')
-    .setVersion('0.2.0')
+    .setDescription(
+      'Auth, users, blog, wallet/payment, subscriptions, notifications, store MVP, and cart endpoints',
+    )
+    .setVersion('0.4.0')
     .addBearerAuth()
     .build();
 

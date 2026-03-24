@@ -4,8 +4,8 @@
 
 > **Author:** DevNguyen0111
 > **Created:** 2026-03-09
-> **Version:** 1.3
-> **Status:** Phase 3 Completed (Wallet + PayOS + Subscription + Notifications Delivered)
+> **Version:** 1.4
+> **Status:** Phase 4 In Progress (Store MVP + Cart + Reviews + Dashboard Delivered)
 
 ---
 
@@ -55,7 +55,7 @@ Multi-functional personal website includes:
 | Validation | class-validator + class-transformer | Input validation               |
 | Testing    | Jest                                | Unit + E2E tests               |
 
-> Current status note (2026-03-19): Wallet + PayOS + Subscription Revamp + minimal subscription notifications are implemented. Redis/Bull/WebSocket are not enabled in the current codebase.
+> Current status note (2026-03-24): Auth/Users/Blog/Wallet/Subscription/Notifications are stable; Store MVP (`products`, `orders`, `reviews`, `store dashboard`) and `cart` APIs are now implemented. Redis/Bull/WebSocket, tickets, wiki, gamification, and social modules are still roadmap.
 
 ---
 
@@ -183,11 +183,19 @@ Multi-functional personal website includes:
 - Input sanitization (XSS)
 - Refresh token rotation
 
+### 3.12 🧺 Cart
+
+- One active cart per user
+- Add/update/remove item, clear cart
+- Checkout cart into order
+- Re-validate product availability + latest price at checkout
+- `custom_order` flow does not use cart (quote flow only)
+
 ---
 
 ## 4. Database Design
 
-### Collections Overview (20+)
+### Collections Overview (21+)
 
 | # | Collection | Scope | Description |
 | --- | --------------------- | ------------ | --------------------------------------------------- |
@@ -212,6 +220,7 @@ Multi-functional personal website includes:
 | 19 | user_badges | Gamification | Which user got the badge |
 | 20 | leaderboard_snapshots | Gamification | Ranking |
 | 21 | audit_logs | System | System log |
+| 22 | carts | Store | User shopping cart |
 
 ---
 
@@ -920,9 +929,42 @@ Multi-functional personal website includes:
 // TTL: { createdAt: 1, expireAfterSeconds: 15552000 } (180 days)
 ```
 
+### 4.22 carts
+
+```js
+{
+  _id: ObjectId,
+  userId: ObjectId,                 // unique: one active cart per user
+  items: [
+    {
+      _id: ObjectId,
+      productId: ObjectId,
+      productName: String,
+      productSlug: String,
+      unitPrice: Number,
+      quantity: Number,
+      lineTotal: Number,
+      currency: String
+    }
+  ],
+  subtotal: Number,
+  discountTotal: Number,
+  total: Number,
+  currency: String,
+  createdAt: Date,
+  updatedAt: Date
+}
+
+// Indexes:
+// { userId: 1 } unique
+```
+
 ---
 
 ## 5. API Endpoints
+
+> **Implementation snapshot (2026-03-24):** Auth/Users/Blog/Wallet/Subscriptions/Notifications/Health plus Store MVP (`products`, `orders`) and `cart` are implemented.
+> Endpoints listed below that are not yet in code are marked as **(planned)** in description.
 
 ### 5.1 Auth
 
@@ -935,22 +977,22 @@ Multi-functional personal website includes:
 | POST | /auth/forgot-password | Public | Send reset email |
 | POST   | /auth/reset-password  | Public | Reset password  |
 | POST | /auth/verify-email | Public | Email authentication |
-| POST | /auth/2fa/enable | User | Enable 2FA |
-| POST | /auth/2fa/verify | User | 2FA Authentication |
-| POST | /auth/2fa/disable | User | Turn off 2FA |
+| POST | /auth/2fa/enable | User | Enable 2FA (planned) |
+| POST | /auth/2fa/verify | User | 2FA Authentication (planned) |
+| POST | /auth/2fa/disable | User | Turn off 2FA (planned) |
 
 ### 5.2 Users
 
 | Method | Path                 | Auth   | Description         |
 | ------ | -------------------- | ------ | ------------------- |
-| GET | /users/me | User | Personal profile |
-| PATCH | /users/me | User | Update profile |
-| GET | /users/:username | Public | Public profile |
-| GET | /users/:id/followers | Public | List of followers |
-| GET | /users/:id/following | Public | Following list |
-| POST   | /users/:id/follow    | User   | Follow              |
-| DELETE | /users/:id/follow    | User   | Unfollow            |
-| GET | /users/leaderboard | Public | Ranking |
+| GET | /users/me | User | Personal profile (implemented) |
+| PATCH | /users/me | User | Update profile (implemented) |
+| GET | /users/:username | Public | Public profile (planned) |
+| GET | /users/:id/followers | Public | List of followers (planned) |
+| GET | /users/:id/following | Public | Following list (planned) |
+| POST   | /users/:id/follow    | User   | Follow (planned) |
+| DELETE | /users/:id/follow    | User   | Unfollow (planned) |
+| GET | /users/leaderboard | Public | Ranking (planned) |
 
 ### 5.3 Blog — Posts
 
@@ -986,10 +1028,10 @@ Multi-functional personal website includes:
 
 | Method | Path                          | Auth        | Description     |
 | ------ | ----------------------------- | ----------- | --------------- |
-| GET | /moderation/posts | Staff/Admin | Post review queue |
-| PATCH | /moderation/posts/:id/approve | Staff/Admin | Browse articles |
-| PATCH | /moderation/posts/:id/reject | Staff/Admin | Reject article |
-| GET | /moderation/stats | Staff/Admin | Browsing statistics |
+| GET | /moderation/posts | Staff/Admin | Post review queue (implemented) |
+| PATCH | /moderation/posts/:id/approve | Staff/Admin | Browse articles (implemented) |
+| PATCH | /moderation/posts/:id/reject | Staff/Admin | Reject article (implemented) |
+| GET | /moderation/stats | Staff/Admin | Browsing statistics (planned) |
 
 ### 5.7 Categories
 
@@ -1023,44 +1065,44 @@ Multi-functional personal website includes:
 
 | Method | Path            | Auth        | Description    |
 | ------ | --------------- | ----------- | -------------- |
-| GET    | /products       | Public      | Listing        |
-| GET | /products/:slug | Public | Details |
-| POST | /products | Staff/Admin | Create product |
-| PATCH | /products/:id | Staff/Admin | Update |
-| DELETE | /products/:id   | Staff/Admin | Archive        |
-| GET | /products/me | Staff/Admin | Store products |
+| GET    | /products       | Public      | Listing (implemented) |
+| GET | /products/:identifier | Public | Details by id/slug (implemented) |
+| POST | /products | Staff/Admin | Create product (implemented) |
+| PATCH | /products/:id | Staff/Admin | Update (implemented) |
+| DELETE | /products/:id   | Staff/Admin | Archive (implemented) |
+| GET | /products/me | Staff/Admin | Store products (implemented) |
 
 ### 5.11 Store — Orders
 
 | Method | Path                       | Auth                     | Description              |
 | ------ | -------------------------- | ------------------------ | ------------------------ |
-| POST | /orders | User | Create order |
-| GET | /orders/me | User | My order (buyer) |
-| GET | /orders/:id | User (buyer)/Staff/Admin | Single details |
-| POST | /orders/:id/complete | User (buyer) | Confirmation complete |
-| POST | /orders/:id/cancel | User (buyer) | Cancel order |
-| POST | /orders/:id/refund-request | User (buyer) | Request a Refund |
-| GET    | /orders/:id/download       | User (buyer)             | Download file            |
+| POST | /orders | User | Create direct order (implemented) |
+| GET | /orders/me | User | My order (buyer) (implemented) |
+| GET | /orders/:id | User (buyer)/Staff/Admin | Single details (implemented) |
+| POST | /orders/:id/complete | User (buyer) | Confirmation complete (planned) |
+| POST | /orders/:id/cancel | User (buyer) | Cancel order (planned) |
+| POST | /orders/:id/refund-request | User (buyer) | Request a Refund (planned) |
+| GET    | /orders/:id/download       | User (buyer)             | Download file (planned)  |
 
 ### 5.12 Store — Management Orders
 
 | Method | Path                      | Auth        | Description           |
 | ------ | ------------------------- | ----------- | --------------------- |
-| GET | /store/orders | Staff/Admin | Store orders |
-| PATCH | /store/orders/:id/status | Staff/Admin | Status Update |
-| POST | /store/orders/:id/quote | Staff/Admin | Custom order quote |
-| POST | /store/orders/:id/deliver | Staff/Admin | Upload delivery file |
-| GET    | /store/dashboard          | Staff/Admin | Revenue dashboard   |
+| GET | /store/orders | Staff/Admin | Store orders (implemented) |
+| PATCH | /store/orders/:id/status | Staff/Admin | Status Update (planned) |
+| POST | /store/orders/:id/quote | Staff/Admin | Custom order quote (planned) |
+| POST | /store/orders/:id/deliver | Staff/Admin | Upload delivery file (planned) |
+| GET    | /store/dashboard          | Staff/Admin | Revenue dashboard (implemented, MVP) |
 
 ### 5.13 Store — Reviews
 
 | Method | Path                         | Auth         | Description      |
 | ------ | ---------------------------- | ------------ | ---------------- |
-| GET | /products/:productId/reviews | Public | Product reviews |
-| POST | /products/:productId/reviews | User (buyer) | Create review |
-| GET    | /store/reviews               | Public       | Store reviews    |
-| POST   | /store/reviews               | User (buyer) | Review store     |
-| PATCH  | /reviews/:id/reply           | Staff/Admin  | Reply review     |
+| GET | /products/:productId/reviews | Public | Product reviews (implemented) |
+| POST | /products/:productId/reviews | User (buyer) | Create review (implemented) |
+| GET    | /store/reviews               | Public       | Store reviews (implemented) |
+| POST   | /store/reviews               | User (buyer) | Review store (implemented) |
+| PATCH  | /reviews/:id/reply           | Staff/Admin  | Reply review (implemented) |
 
 ### 5.14 Wallet
 
@@ -1090,22 +1132,22 @@ Multi-functional personal website includes:
 
 | Method | Path                  | Auth             | Description     |
 | ------ | --------------------- | ---------------- | --------------- |
-| POST | /tickets | User | Create ticket |
-| GET | /tickets/me | User | My Tickets |
-| GET | /tickets/:id | User (own)/Staff | Details |
-| POST | /tickets/:id/messages | User/Staff | Send message |
-| PATCH | /tickets/:id/close | User (own) | Close ticket |
-| POST | /tickets/:id/reopen | User (own) | Reopen |
-| POST | /tickets/:id/rate | User (own) | Reviews |
+| POST | /tickets | User | Create ticket (planned) |
+| GET | /tickets/me | User | My Tickets (planned) |
+| GET | /tickets/:id | User (own)/Staff | Details (planned) |
+| POST | /tickets/:id/messages | User/Staff | Send message (planned) |
+| PATCH | /tickets/:id/close | User (own) | Close ticket (planned) |
+| POST | /tickets/:id/reopen | User (own) | Reopen (planned) |
+| POST | /tickets/:id/rate | User (own) | Reviews (planned) |
 
 ### 5.17 Tickets — Staff
 
 | Method | Path                             | Auth        | Description    |
 | ------ | -------------------------------- | ----------- | -------------- |
-| GET | /admin/tickets | Staff/Admin | All tickets |
-| PATCH | /admin/tickets/:id/assign | Staff/Admin | Assignment |
-| PATCH | /admin/tickets/:id/status | Staff/Admin | Change status |
-| POST | /admin/tickets/:id/internal-note | Staff/Admin | Internal Notes |
+| GET | /admin/tickets | Staff/Admin | All tickets (planned) |
+| PATCH | /admin/tickets/:id/assign | Staff/Admin | Assignment (planned) |
+| PATCH | /admin/tickets/:id/status | Staff/Admin | Change status (planned) |
+| POST | /admin/tickets/:id/internal-note | Staff/Admin | Internal Notes (planned) |
 
 ### 5.18 Notifications
 
@@ -1141,26 +1183,37 @@ Multi-functional personal website includes:
 
 | Method | Path               | Auth        | Description              |
 | ------ | ------------------ | ----------- | ------------------------ |
-| POST | /upload/image | User | Upload photos |
-| POST | /upload/file | Staff/Admin | Upload product files |
-| POST   | /upload/attachment | User        | Upload attachment ticket |
+| POST | /upload/image | User | Upload photos (planned endpoint; currently blog/users upload via feature routes) |
+| POST | /upload/file | Staff/Admin | Upload product files (planned) |
+| POST   | /upload/attachment | User        | Upload attachment ticket (planned) |
 
 ### 5.22 Admin
 
 | Method | Path                          | Auth  | Description      |
 | ------ | ----------------------------- | ----- | ---------------- |
-| GET    | /admin/dashboard/stats        | Admin | Overview numbers |
-| GET    | /admin/dashboard/revenue      | Admin | Revenue chart  |
-| GET    | /admin/dashboard/users-growth | Admin | User growth      |
-| GET    | /admin/users                  | Admin | List all users   |
-| PATCH | /admin/users/:id/role | Admin | Change role |
-| POST   | /admin/users/:id/ban          | Admin | Ban user         |
-| POST   | /admin/users/:id/unban        | Admin | Unban            |
-| POST | /admin/wallet/adjust | Admin | Add/subtract coins |
-| GET    | /admin/wallet/stats           | Admin | Wallet stats     |
-| GET    | /admin/audit-logs             | Admin | Audit logs       |
+| GET    | /admin/dashboard/stats        | Admin | Overview numbers (planned) |
+| GET    | /admin/dashboard/revenue      | Admin | Revenue chart (planned) |
+| GET    | /admin/dashboard/users-growth | Admin | User growth (planned) |
+| GET    | /admin/users                  | Admin | List all users (planned; current code uses /users with admin role) |
+| PATCH | /admin/users/:id/role | Admin | Change role (planned; current code uses /users/:id/role) |
+| POST   | /admin/users/:id/ban          | Admin | Ban user (planned) |
+| POST   | /admin/users/:id/unban        | Admin | Unban (planned) |
+| POST | /admin/wallet/adjust | Admin | Add/subtract coins (implemented) |
+| GET    | /admin/wallet/stats           | Admin | Wallet stats (planned) |
+| GET    | /admin/audit-logs             | Admin | Audit logs (planned) |
 
-**Total: ~95 endpoints**
+### 5.23 Cart
+
+| Method | Path               | Auth | Description |
+| ------ | ------------------ | ---- | ----------- |
+| GET    | /cart              | User | Get current cart (implemented) |
+| POST   | /cart/items        | User | Add item to cart (implemented) |
+| PATCH  | /cart/items/:itemId | User | Update item quantity (implemented) |
+| DELETE | /cart/items/:itemId | User | Remove item from cart (implemented) |
+| DELETE | /cart              | User | Clear cart (implemented) |
+| POST   | /cart/checkout     | User | Checkout cart to order (implemented) |
+
+**Total target endpoints: ~101 (includes planned)**
 
 ---
 
@@ -1208,6 +1261,10 @@ server/
     │   ├── dto/
     │   └── utils/
     │
+    ├── alerts/
+    │   ├── alerts.module.ts
+    │   └── ops-alert.service.ts
+    │
     ├── auth/
     │   └── ...
     │
@@ -1216,6 +1273,17 @@ server/
     │
     ├── blog/
     │   └── ...
+    │
+    ├── store/
+    │   ├── products/
+    │   ├── orders/
+    │   └── reviews/
+    │
+    ├── cart/
+    │   ├── cart.module.ts
+    │   ├── cart.controller.ts
+    │   ├── cart.service.ts
+    │   └── schemas/
     │
     ├── wallet/
     │   ├── wallet.module.ts
@@ -1252,7 +1320,7 @@ server/
         └── ...
 ```
 
-> Note: Store, ticket, wiki, gamification, and realtime queue modules remain in product roadmap scope, but they are not present in the current backend codebase.
+> Note: Store foundation (`products`, `orders`) and `cart` are now present in backend MVP. Tickets, wiki, gamification, social, and realtime queue modules remain roadmap scope.
 
 ---
 
@@ -1337,19 +1405,20 @@ server/
 
 **Tasks:**
 
-- [ ] Products module: CRUD (staff/admin), listing, search
+- [x] Products module: CRUD (staff/admin), listing, search (MVP)
 - [ ] Product moderation (pending_review)
-- [ ] Orders module: create → wallet.purchase(), status flow
+- [x] Orders module: create → wallet.purchase(), status flow (paid state MVP)
+- [x] Cart module: get/add/update/remove/clear/checkout (MVP)
 - [ ] Digital product: auto-deliver download link
 - [ ] Custom order: quote flow (staff/admin quote → buyer accept)
 - [ ] Delivery files upload
-- [ ] Store dashboard: orders, revenue stats (staff/admin)
-- [ ] Reviews module: product + store reviews, aspects, staff/admin reply
+- [x] Store dashboard: orders, revenue stats (staff/admin) (MVP summary)
+- [x] Reviews module: product + store reviews, aspects, staff/admin reply (MVP)
 - [ ] Auto-complete cron (7 days after delivery)
 - [ ] Platform fee calculation
 - [ ] Secure file download (presigned URL)
 
-**Result:** Store is open, buying and selling with coins.
+**Result:** Partial delivery (MVP): products + buy-now orders + cart checkout + review APIs + basic store dashboard are live; quote/delivery/auto-complete/platform-fee/download flows are pending.
 
 ---
 
@@ -1558,6 +1627,36 @@ Staff seen in moderation queue
 └── Author can edit → draft → resubmit
 ```
 
+### 8.5 Cart Checkout Flow (MVP)
+
+```
+User opens /cart
+    │
+    ▼
+POST /cart/items (productId, quantity)
+    │
+    ▼
+Server:
+├── Validate product exists and status = active
+├── Validate type = digital
+├── Validate stock (if stock is set)
+└── Upsert cart item snapshot (name, slug, unitPrice)
+    │
+    ▼
+POST /cart/checkout
+    │
+    ▼
+Server transaction:
+├── Re-validate all cart products (latest price + availability)
+├── Calculate subtotal/total
+├── wallet.purchase(total)
+├── Create order (status: paid, source: cart)
+└── Clear cart items
+    │
+    ▼
+Return order + empty cart
+```
+
 ---
 
 ## 9. Security
@@ -1621,6 +1720,7 @@ Staff seen in moderation queue
 | 2026-03-15 | 1.1     | Store switched to single-seller (Admin owner, Staff manager) |
 | 2026-03-18 | 1.2     | Wallet module delivered: coin balances, transactions, PayOS deposit flow, anti-fraud and admin adjust APIs |
 | 2026-03-19 | 1.3     | Subscription revamp + notifications: Free/Pro/VIP billing cycles, wallet-based purchase, auto-renew, reminder/renewal email + in-app notifications |
+| 2026-03-24 | 1.4     | Restored alerts module + health runtime wiring, implemented Store MVP (`products`, `orders`, `reviews`, `store dashboard`), added cart APIs/schema/flow and updated roadmap markers (`planned`) in endpoint table |
 
 ---
 

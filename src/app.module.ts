@@ -23,6 +23,11 @@ import { MinioModule } from './minio/minio.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { WalletModule } from './wallet/wallet.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { HealthModule } from './health/health.module';
+import { ProductsModule } from './store/products/products.module';
+import { OrdersModule } from './store/orders/orders.module';
+import { ReviewsModule } from './store/reviews/reviews.module';
+import { CartModule } from './cart/cart.module';
 
 @Module({
   imports: [
@@ -43,6 +48,11 @@ import { NotificationsModule } from './notifications/notifications.module';
     SubscriptionsModule,
     WalletModule,
     NotificationsModule,
+    HealthModule,
+    ProductsModule,
+    OrdersModule,
+    ReviewsModule,
+    CartModule,
     UsersModule,
     AuthModule,
     BlogModule,
