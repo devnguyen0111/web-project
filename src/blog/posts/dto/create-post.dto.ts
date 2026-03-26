@@ -94,4 +94,28 @@ export class CreatePostDto {
   @ValidateNested()
   @Type(() => CreatePollDto)
   poll?: CreatePollDto;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether this post requires VIP to read',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isExclusive?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether this post is marked as featured',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isFeatured?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether this post is pinned on top of the blog list',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
 }

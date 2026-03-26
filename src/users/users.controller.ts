@@ -22,6 +22,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '../common/constants/roles.constant';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { ParseObjectIdPipe } from '../common/pipes/parse-objectid.pipe';
@@ -127,7 +128,16 @@ export class UsersController {
     return this.usersService.listUsers(query);
   }
 
-  @Get(':id')
+  @Public()
+  @Get(':username')
+  @ApiOperation({ summary: 'Get public profile by username' })
+  @ApiParam({ name: 'username', description: 'Public username' })
+  @ApiResponse({ status: 200, description: 'Public profile returned' })
+  async getPublicProfile(@Param('username') username: string) {
+    return this.usersService.getPublicProfileByUsername(username);
+  }
+
+  @Get('id/:id')
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: 'Get user by id (admin only)' })
   @ApiParam({ name: 'id', description: 'Mongo ObjectId of the user' })

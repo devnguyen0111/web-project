@@ -31,6 +31,8 @@ describe('WalletService', () => {
   let userModel: {
     findById: jest.Mock;
     findOne: jest.Mock;
+    aggregate: jest.Mock;
+    countDocuments: jest.Mock;
   };
   let transactionModel: {
     findOne: jest.Mock;
@@ -62,6 +64,8 @@ describe('WalletService', () => {
     userModel = {
       findById: jest.fn(),
       findOne: jest.fn(),
+      aggregate: jest.fn(),
+      countDocuments: jest.fn(),
     };
     transactionModel = {
       findOne: jest.fn(),
@@ -555,10 +559,96 @@ describe('WalletService', () => {
         totalAdjusted: 15,
         totalSpent: 35,
         currency: 'VND',
+        coinToVndRate: 1000,
         transactionCount: 9,
         lastTransactionAt,
       }),
     );
+  });
+
+  it('aggregates admin wallet stats summary and series', async () => {
+    userModel.aggregate.mockReturnValue(
+      buildAggregation([
+        {
+          _id: null,
+          totalBalance: 1000,
+          totalFrozenBalance: 120,
+          totalLifetimeDeposit: 3000,
+        },
+      ]),
+    );
+    userModel.countDocuments.mockResolvedValue(12);
+
+    transactionModel.aggregate
+      .mockReturnValueOnce(
+        buildAggregation([
+          {
+            _id: TransactionType.DEPOSIT,
+            totalAmount: 5000,
+            count: 8,
+            adminAdjustNet: 0,
+          },
+          {
+            _id: TransactionType.ADMIN_ADJUST,
+            totalAmount: 200,
+            count: 3,
+            adminAdjustNet: -50,
+          },
+          {
+            _id: TransactionType.REFUND_BUYER,
+            totalAmount: 300,
+            count: 2,
+            adminAdjustNet: 0,
+          },
+          {
+            _id: TransactionType.PURCHASE,
+            totalAmount: 1400,
+            count: 6,
+            adminAdjustNet: 0,
+          },
+        ]),
+      )
+      .mockReturnValueOnce(
+        buildAggregation([
+          {
+            _id: '2026-03-20',
+            depositAmount: 1000,
+            adminAdjustNet: -20,
+            refundAmount: 100,
+            purchaseAmount: 500,
+            transactionCount: 4,
+          },
+        ]),
+      );
+
+    const result = await service.getAdminWalletStats({
+      from: '2026-03-01T00:00:00.000Z',
+      to: '2026-03-31T23:59:59.999Z',
+      groupBy: 'day',
+    } as never);
+
+    expect(result.summary).toEqual(
+      expect.objectContaining({
+        usersWithWallet: 12,
+        totalBalance: 1000,
+        totalFrozenBalance: 120,
+        totalLifetimeDeposit: 3000,
+        depositTotal: 5000,
+        adminAdjustNet: -50,
+        refundTotal: 300,
+        purchaseTotal: 1400,
+      }),
+    );
+    expect(result.series).toEqual([
+      expect.objectContaining({
+        period: '2026-03-20',
+        depositAmount: 1000,
+        adminAdjustNet: -20,
+        refundAmount: 100,
+        purchaseAmount: 500,
+        netFlow: 580,
+      }),
+    ]);
   });
 
   it('returns subscription transaction as debit direction for wallet history', async () => {
@@ -630,14 +720,17 @@ describe('WalletService', () => {
       signatureValid: true,
     });
 
-    const result = await service.syncPayosReturnStatus({
-      orderCode: '1773857686372',
-      paymentLinkId: 'f60d5607d7d04b29842ea25e16b6a0b5',
-      status: 'CANCELLED',
-      cancel: 'true',
-      code: '00',
-      id: 'f60d5607d7d04b29842ea25e16b6a0b5',
-    }, 'valid-signature');
+    const result = await service.syncPayosReturnStatus(
+      {
+        orderCode: '1773857686372',
+        paymentLinkId: 'f60d5607d7d04b29842ea25e16b6a0b5',
+        status: 'CANCELLED',
+        cancel: 'true',
+        code: '00',
+        id: 'f60d5607d7d04b29842ea25e16b6a0b5',
+      },
+      'valid-signature',
+    );
 
     expect(result.code).toBe('00');
     expect(transaction.status).toBe('failed');
@@ -669,11 +762,14 @@ describe('WalletService', () => {
       signatureValid: true,
     });
 
-    const result = await service.syncPayosReturnStatus({
-      orderCode: '1773857686372',
-      status: 'CANCELLED',
-      cancel: 'true',
-    }, 'valid-signature');
+    const result = await service.syncPayosReturnStatus(
+      {
+        orderCode: '1773857686372',
+        status: 'CANCELLED',
+        cancel: 'true',
+      },
+      'valid-signature',
+    );
 
     expect(result.code).toBe('00');
     expect(transaction.status).toBe('completed');

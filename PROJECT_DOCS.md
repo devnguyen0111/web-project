@@ -4,8 +4,8 @@
 
 > **Author:** DevNguyen0111
 > **Created:** 2026-03-09
-> **Version:** 1.4
-> **Status:** Phase 4 In Progress (Store MVP + Cart + Reviews + Dashboard Delivered)
+> **Version:** 1.6
+> **Status:** Phase 2-5 Delivered, Phase 6 In Progress (Phase 1 still has infra backlog: Docker Compose)
 
 ---
 
@@ -20,6 +20,7 @@
 7. [Phase Plan](#7-phase-plan)
 8. [Flow Diagrams](#8-flow-diagrams)
 9. [Security](#9-security)
+10. [Frontend Readiness](#10-frontend-readiness)
 
 ---
 
@@ -44,9 +45,9 @@ Multi-functional personal website includes:
 | Frontend   | Next.js 16.1.6 + React 19 (App Router) | SSR/SSG, SEO, Dashboard     |
 | Backend    | NestJS 11 + TypeScript              | REST API, modular architecture |
 | Database   | MongoDB + Mongoose 9                | Document storage               |
-| Cache      | Redis 7+                            | Session, rate limit, realtime (planned) |
+| Cache      | Redis 7+                            | Session, distributed lock, multi-instance WS adapter (planned) |
 | Queue      | Bull (@nestjs/bull)                 | Email, async jobs (planned)    |
-| WebSocket  | Socket.io (@nestjs/websockets)      | Realtime notifications (planned) |
+| WebSocket  | Socket.io (@nestjs/websockets)      | Realtime notifications + tickets conversation (implemented, single-instance) |
 | Storage    | AWS S3 / Cloudinary                 | Files, images                  |
 | Auth       | JWT + Refresh Token + 2FA (TOTP)    | Authentication                 |
 | Payment    | PayOS (primary)                      | Deposit coins                  |
@@ -55,7 +56,7 @@ Multi-functional personal website includes:
 | Validation | class-validator + class-transformer | Input validation               |
 | Testing    | Jest                                | Unit + E2E tests               |
 
-> Current status note (2026-03-24): Auth/Users/Blog/Wallet/Subscription/Notifications are stable; Store MVP (`products`, `orders`, `reviews`, `store dashboard`) and `cart` APIs are now implemented. Redis/Bull/WebSocket, tickets, wiki, gamification, and social modules are still roadmap.
+> Current status note (2026-03-26): Auth now supports step-up 2FA (TOTP + backup codes), Notifications + Tickets include Socket.IO realtime, Tickets have role-sensitive operation policy + auto-assign, Store buyer/staff order actions are surfaced in FE, and public Wiki FE list/detail/helpful vote is live. Redis/Bull queue remains roadmap.
 
 ---
 
@@ -93,9 +94,15 @@ Multi-functional personal website includes:
 - Create tickets linked to orders, products, wallets, and accounts
 - **Priority:** Low / Medium / High / Urgent
 - **Status:** Open → Awaiting User → In Progress → Escalated → Resolved → Closed
+- **Realtime:** Socket.IO namespace `/tickets` for message + ticket status push
+- **Auto-assign:** seller-first (order-linked) → least-load active staff/admin fallback
 - Staff assignment + escalation
+- **Role policy:**
+  - Admin: full read/write/assign/status override
+  - Staff: read assigned+unassigned, claim only unassigned to self, write/status/internal-note only when assigned to self
 - Internal notes (buyer does not see)
 - System auto messages (status changed, assigned)
+- Reply/internal-note attachments via `/upload/attachment`
 - **SLA tracking:** First response due, resolution due
 - Satisfaction rating (1-5) after resolution
 
@@ -103,10 +110,10 @@ Multi-functional personal website includes:
 
 - Each user has a wallet: balance, frozenBalance, totalEarned, totalSpent
 - **Deposit coins:** PayOS → deposit_requests → verify → add coins
-- **Receive coins:** Approved articles, referral bonus, daily mission
+- **Receive coins:** Approved articles, completed sales settlement, admin adjustments
 - **Spending coins:** Buy goods, buy subscriptions
 - **Admin (store owner) receives coin:** sale_income (after order is completed, minus platform fee)
-- **Admin withdrawal:** withdrawal flow
+- **Admin withdrawal:** withdrawal flow (roadmap)
 - Full transaction history (balanceBefore/After)
 - **Anti-fraud:** IP tracking, user agent, flagged transactions
 - MongoDB transaction (session) for all wallet operations
@@ -114,12 +121,11 @@ Multi-functional personal website includes:
 ### 3.5 🏅 Gamification
 
 - **XP/Level system:** Get XP when active, auto level up
-- **Badges:** Common → Uncommon → Rare → Epic → Legendary
-- Badge conditions: posts_published, sales_count, login_streak, level_reached, etc.
-- Secret badges (hidden until achieved)
-- Badge rewards: coin + XP
-- **Leaderboard:** Top contributors, buyers, level (weekly/monthly/alltime)
-- Pre-computed leaderboard snapshots (cron job)
+- **Badges (MVP):** first-post, content-writer, first-sale, trusted-seller, level milestones
+- Badge conditions: `posts_published`, `sales_count`, `level_reached`
+- Badge rewards: XP (notification `badge_earned`)
+- **Leaderboard:** users sorted by XP/level/sales (API live)
+- Pre-computed leaderboard snapshots (cron job: alltime/weekly/monthly)
 
 ### 3.6 👤 Social
 
@@ -145,13 +151,14 @@ Multi-functional personal website includes:
 
 ### 3.8 🔔 Notifications
 
-- **Realtime:** Planned via WebSocket (Socket.io), not enabled in current codebase
-- **Types:** post_approved, order_new, ticket_reply, deposit_completed, badge_earned, level_up, etc.
-- **Multi-channel:** In-app, Email, Push
+- **Realtime:** Socket.IO namespace `/notifications` (push-only, JWT handshake auth, single-instance)
+- **Types:** subscription, ticket, blog moderation, store order lifecycle, wallet deposit/admin-adjust, badge earned
+- **Channels hiện tại:** In-app + WebSocket realtime
+- **Email/Push:** roadmap
 - From user info (who caused the notification)
 - Mark read / read all
-- Unread count (HTTP API in current implementation)
-- TTL 90 days (auto cleanup)
+- Unread count (HTTP + realtime push)
+- TTL cleanup policy 90 days (planned task)
 
 ### 3.9 📚 Knowledge Base / Wiki
 
@@ -162,6 +169,7 @@ Multi-functional personal website includes:
 - Access control: Public / Pro only / VIP only
 - Separate wiki categories
 - Full-text search
+- **Frontend (public) now live:** `/knowledge` list/search/filter + `/knowledge/:slug` detail + helpful vote action for authenticated users
 
 ### 3.10 ⭐ Review/Rating
 
@@ -175,11 +183,11 @@ Multi-functional personal website includes:
 
 ### 3.11 🔐 Security & Admin
 
-- **2FA:** TOTP (Google Authenticator) + backup codes
-- **Audit logs:** All important actions (login, approve, refund, ban, role change)
-- **Admin dashboard:** Overview stats, revenue chart, user growth
+- **2FA:** TOTP (Google Authenticator) + backup codes + step-up login challenge
+- **Audit logs:** Persistent `audit_logs` + global write interceptor (POST/PUT/PATCH/DELETE)
+- **Admin dashboard:** Overview stats, revenue chart, user growth (`/admin/dashboard/*`)
 - **User management:** Ban/unban, change role, wallet adjust
-- Rate limiting (ThrottlerModule)
+- Rate limiting (custom in-memory limiter cho auth/payment; ThrottlerModule planned)
 - Input sanitization (XSS)
 - Refresh token rotation
 
@@ -195,7 +203,7 @@ Multi-functional personal website includes:
 
 ## 4. Database Design
 
-### Collections Overview (21+)
+### Collections Overview (23)
 
 | # | Collection | Scope | Description |
 | --- | --------------------- | ------------ | --------------------------------------------------- |
@@ -221,6 +229,7 @@ Multi-functional personal website includes:
 | 20 | leaderboard_snapshots | Gamification | Ranking |
 | 21 | audit_logs | System | System log |
 | 22 | carts | Store | User shopping cart |
+| 23 | user_follows | Social | Follow relationships |
 
 ---
 
@@ -229,20 +238,16 @@ Multi-functional personal website includes:
 ```js
 {
   _id: ObjectId,
-  username: String,                    // unique, lowercase
-  email: String,                       // unique
-  password: String,                    // bcrypt
-  displayName: String,
-  avatar: String,
-  bio: String,
-  website: String,
-  socialLinks: { github, twitter, linkedin },
-
+  fullName: String,
+  email: String,                      // unique, lowercase
+  password: String,                   // bcrypt, select:false
   role: enum ["guest", "author", "staff", "admin"],
-  permissions: [String],
+  isEmailVerified: Boolean,
+  isActive: Boolean,
+  avatarUrl: String,
 
   wallet: {
-    balance: Number (min: 0),
+    balance: Number,
     frozenBalance: Number,
     totalEarned: Number,
     totalSpent: Number,
@@ -250,62 +255,62 @@ Multi-functional personal website includes:
   },
 
   subscription: {
-    tier: enum ["free", "pro", "vip"],
-    subscribedAt: Date,
+    planCode: String,
+    planName: String,
+    basePostLimit: Number,
+    extraPosts: Number,
+    monthlyPriceCoins: Number,
+    billingCycle: enum ["monthly", "quarterly", "yearly"],
+    autoRenew: Boolean,
+    cancelAtPeriodEnd: Boolean,
+    status: String,
+    startedAt: Date,
     expiresAt: Date,
-    autoRenew: Boolean
+    currentPeriodStart: Date,
+    currentPeriodEnd: Date,
+    postsUsedInPeriod: Number,
+    renewedAt: Date,
+    nextRenewalAt: Date,
+    renewalFailedAt: Date,
+    gracePeriodEndsAt: Date,
+    reminder7dSentAt: Date,
+    reminder3dSentAt: Date
   },
 
-  level: Number,
-  xp: Number,
-  xpToNextLevel: Number,
+  followersCount: Number,
+  followingCount: Number,
 
-  stats: {
-    postsPublished, totalPostViews, totalLikesReceived,
-    commentsCount, productsSold, totalRevenue,
-    ordersMade, followersCount, followingCount
+  gamification: {
+    xp: Number,
+    level: Number,
+    xpToNextLevel: Number,
+    postsPublished: Number,
+    salesCount: Number
   },
 
   twoFactor: {
     enabled: Boolean,
-    secret: String,           // encrypted TOTP
-    backupCodes: [String],    // hashed
-    enabledAt: Date
+    secretEncrypted: String,      // encrypted TOTP secret (AES-256-GCM), select:false
+    backupCodeHashes: [String],   // hashed one-time backup codes, select:false
+    enabledAt: Date,
+    lastVerifiedAt: Date
   },
 
-  refreshTokens: [{ token, device, ip, expiresAt, createdAt }],
-  emailVerified: Boolean,
-
-  followers: [ObjectId],
-  following: [ObjectId],
-
-  storeProfile: {
-    shopName, shopDescription, shopBanner,
-    rating, reviewsCount, verified, joinedAt
-  },
-
-  isBanned: Boolean,
-  banReason: String,
-  lastLoginAt: Date,
-  lastActiveAt: Date,
-  loginStreak: Number,
-  referralCode: String,
-  referredBy: ObjectId,
+  refreshToken: String,               // hashed refresh token, select:false
+  emailVerificationCodeHash: String,  // select:false
+  emailVerificationCodeExpiresAt: Date,
+  passwordResetCodeHash: String,      // select:false
+  passwordResetCodeExpiresAt: Date,
 
   createdAt: Date,
   updatedAt: Date
 }
 
 // Indexes:
-// { username: 1 } unique
 // { email: 1 } unique
-// { referralCode: 1 } unique sparse
 // { role: 1 }
-// { "subscription.tier": 1 }
-// { level: -1, xp: -1 }
-// { "stats.postsPublished": -1 }
-// { "stats.totalRevenue": -1 }
-// { "storeProfile.rating": -1 }
+// { followersCount: -1 }
+// { gamification.xp: -1, gamification.level: -1 }
 ```
 
 ### 4.2 subscriptions
@@ -553,45 +558,37 @@ Multi-functional personal website includes:
 ```js
 {
   _id: ObjectId,
-  sellerId: ObjectId,                // always Admin userId (single store owner)
   name: String,
-  slug: String,                        // unique
+  slug: String,                      // unique
   description: String,
-  shortDescription: String,
-  images: [{ url, alt, order }],
-  previewUrl: String,
   type: enum ["digital", "custom_order"],
-  files: [{ filename, storagePath, size, mimeType, version, uploadedAt }],
-  customFields: [{ _id, label, type, options, required, placeholder }],
-  estimatedDays: { min, max },
-  price: Number,
-  originalPrice: Number,
-  isOnSale: Boolean,
-  saleEndsAt: Date,
-  categoryId: ObjectId,
-  tags: [String],
-  salesCount: Number,
-  rating: Number,
-  reviewsCount: Number,
-  viewsCount: Number,
-  favoritesCount: Number,
-  status: enum ["draft", "pending_review", "active", "paused", "rejected", "archived"],
-  reviewedBy: ObjectId,
-  rejectionReason: String,
+  status: enum ["draft", "pending_review", "active", "rejected", "archived"],
+  priceAmount: Number,
+  currency: String,                  // default "VND"
   stock: Number,
-  maxPerUser: Number,
-  isFeatured: Boolean,
-  subscriberDiscount: { pro: Number, vip: Number },
+  createdBy: ObjectId,
+  digitalAsset: {
+    bucketName: String,
+    objectName: String,
+    fileName: String,
+    mimeType: String,
+    size: Number,
+    etag: String,
+    uploadedAt: Date
+  },
+  submittedAt: Date,
+  reviewedBy: ObjectId,
+  reviewedAt: Date,
+  rejectionReason: String,
   createdAt: Date,
   updatedAt: Date
 }
 
 // Indexes:
 // { slug: 1 } unique
-// { sellerId: 1, status: 1 }
-// { status: 1, categoryId: 1 }
-// { type: 1, status: 1 }
-// { rating: -1, salesCount: -1 }
+// { status: 1, type: 1, createdAt: -1 }
+// { createdBy: 1, createdAt: -1 }
+// { status: 1, submittedAt: 1 }
 // { name: "text", description: "text" }
 ```
 
@@ -600,41 +597,52 @@ Multi-functional personal website includes:
 ```js
 {
   _id: ObjectId,
-  orderNumber: String,                 // "ORD-20260309-0001"
+  orderNumber: String,                // unique
   buyerId: ObjectId,
-  sellerId: ObjectId,                // always Admin userId (single store owner)
+  sellerId: ObjectId,
   items: [{
     productId: ObjectId,
-    productSnapshot: { name, type, price, image },
+    productName: String,
+    productSlug: String,
+    productType: enum ["digital","custom_order"],
+    currency: String,
     quantity: Number,
     unitPrice: Number,
-    discount: Number,
-    subtotal: Number,
+    lineTotal: Number,
+    digitalAsset: { bucketName, objectName, fileName, mimeType, size },
     customData: Mixed
   }],
   subtotal: Number,
+  discountTotal: Number,
+  total: Number,
+  currency: String,
   platformFee: Number,
-  totalAmount: Number,
   sellerReceives: Number,
+  source: enum ["buy_now","cart"],
   buyerTransactionId: ObjectId,
+  transactionId: ObjectId,
   sellerTransactionId: ObjectId,
+  platformFeeTransactionId: ObjectId,
   status: enum [
     "pending", "paid",
     "quoted", "quote_accepted",
     "processing", "delivered", "completed",
-    "cancelled", "refund_requested", "refunded", "disputed"
+    "cancelled"
   ],
-  quote: { price, estimatedDays, note, quotedAt, acceptedAt },
-  deliveryFiles: [{ filename, storagePath, size, uploadedAt }],
+  quote: { priceAmount, estimatedDays, note, quotedAt, quotedBy, acceptedAt },
+  deliveryFiles: [{
+    bucketName, objectName, fileName, mimeType, size, etag,
+    uploadedAt, uploadedBy, fromProductAsset
+  }],
+  deliveryEmailLogs: [{ fileObjectName, status, claimedAt, sentAt }],
   deliveredAt: Date,
   completedAt: Date,
+  paidAt: Date,
   autoCompleteAt: Date,
+  settledAt: Date,
   statusHistory: [{ from, to, note, changedBy, changedAt }],
-  buyerNote: String,
-  managerNote: String,
-  adminNote: String,
+  idempotencyKey: String,
   cancelReason: String,
-  refund: { reason, requestedAt, processedBy, processedAt, amount },
   createdAt: Date,
   updatedAt: Date
 }
@@ -644,6 +652,8 @@ Multi-functional personal website includes:
 // { buyerId: 1, status: 1, createdAt: -1 }
 // { sellerId: 1, status: 1, createdAt: -1 }
 // { status: 1, autoCompleteAt: 1 }
+// { buyerId: 1, createdAt: -1 }
+// { buyerId: 1, idempotencyKey: 1 } unique sparse
 ```
 
 ### 4.12 reviews
@@ -810,33 +820,27 @@ Multi-functional personal website includes:
 {
   _id: ObjectId,
   userId: ObjectId,
+  category: enum ["subscription","ticket","blog","store","wallet","gamification","social"],
   type: enum [
-    "post_approved","post_rejected","post_liked","post_commented","comment_replied",
-    "order_new","order_status_changed","order_delivered","order_completed",
-    "new_review","quote_received",
-    "ticket_reply","ticket_resolved","ticket_assigned",
-    "deposit_completed","coin_reward","withdrawal_completed",
-    "new_follower","mention",
-    "badge_earned","level_up",
-    "subscription_expiring","subscription_expired",
-    "system_announcement"
+    "subscription_reminder","subscription_renewed","subscription_failed","subscription_expired",
+    "ticket_created","ticket_reply","ticket_assigned","ticket_status_changed",
+    "blog_post_approved","blog_post_rejected",
+    "store_order_created","store_quote_created","store_quote_accepted","store_quote_rejected",
+    "store_delivery_uploaded","store_order_completed","store_order_auto_completed",
+    "wallet_deposit_completed","wallet_deposit_failed","wallet_deposit_cancelled","wallet_admin_adjusted",
+    "badge_earned"
   ],
   title: String,
   message: String,
-  reference: { model, id },
-  actionUrl: String,
-  fromUser: { userId, displayName, avatar },
-  isRead: Boolean,
   readAt: Date,
-  channels: { inApp, email, push },
-  emailSentAt: Date,
+  metadata: Mixed,
   createdAt: Date
 }
 
 // Indexes:
-// { userId: 1, isRead: 1, createdAt: -1 }
-// { userId: 1, type: 1, createdAt: -1 }
-// TTL: { createAt: 1, expireAfterSeconds: 7776000 } (90 days)
+// { userId: 1, createdAt: -1 }
+// { userId: 1, readAt: 1, createdAt: -1 }
+// TTL policy target: 90 days (runtime cleanup/index rollout pending)
 ```
 
 ### 4.18 badges
@@ -844,28 +848,23 @@ Multi-functional personal website includes:
 ```js
 {
   _id: ObjectId,
+  code: String, // unique
   name: String,
-  slug: String,
   description: String,
-  icon: String,
-  color: String,
-  rarity: enum ["common","uncommon","rare","epic","legendary"],
-  condition: {
-    metric: String,    // "posts_published","sales_count","login_streak", etc.
-    operator: String,  // "gte","eq"
-    value: Number
+  iconUrl: String,
+  criteria: {
+    type: enum ["posts_published","sales_count","level_reached"],
+    threshold: Number
   },
-  coinReward: Number,
   xpReward: Number,
   isActive: Boolean,
-  isSecret: Boolean,
-  order: Number,
-  createdAt: Date
+  createdAt: Date,
+  updatedAt: Date
 }
 
 // Indexes:
-// { slug: 1 } unique
-// { rarity: 1, order: 1 }
+// { code: 1 } unique
+// { isActive: 1, createdAt: -1 }
 ```
 
 ### 4.19 user_badges
@@ -875,15 +874,14 @@ Multi-functional personal website includes:
   _id: ObjectId,
   userId: ObjectId,
   badgeId: ObjectId,
-  earnedAt: Date,
-  isDisplayed: Boolean,
-  badgeSnapshot: { name, icon, rarity }
+  badgeCode: String,
+  awardedAt: Date,
+  metadata: Mixed
 }
 
 // Indexes:
-// { userId: 1, badgeId: 1 } unique compound
-// { userId: 1, isDisplayed: 1 }
-// { badgeId: 1 }
+// { userId: 1, badgeCode: 1 } unique compound
+// { userId: 1, awardedAt: -1 }
 ```
 
 ### 4.20 leaderboard_snapshots
@@ -891,19 +889,23 @@ Multi-functional personal website includes:
 ```js
 {
   _id: ObjectId,
-  type: enum ["top_contributors","top_liked","top_buyers","top_level","top_streak"],
   period: enum ["weekly","monthly","alltime"],
+  periodKey: String, // unique with period
   entries: [{
-    rank, userId, username, displayName, avatar, level,
-    score, scoreLabel
+    userId,
+    rank,
+    xp,
+    level,
+    postsPublished,
+    salesCount
   }],
   generatedAt: Date,
-  periodStart: Date,
-  periodEnd: Date
+  createdAt: Date,
+  updatedAt: Date
 }
 
 // Indexes:
-// { type: 1, period: 1, generatedAt: -1 }
+// { period: 1, periodKey: 1 } unique
 ```
 
 ### 4.21 audit_logs
@@ -915,10 +917,14 @@ Multi-functional personal website includes:
   userRole: String,
   ip: String,
   userAgent: String,
-  action: String,    // "user.login","post.approve","wallet.admin_adjust", etc.
-  target: { model, id },
-  details: Mixed,    // { before: {...}, after: {...} }
-  severity: enum ["info","warning","critical"],
+  method: String,     // POST/PATCH/PUT/DELETE
+  route: String,      // normalized route path
+  action: String,     // "METHOD /route"
+  target: String,     // selected route param id
+  statusCode: Number,
+  severity: enum ["info","warning","error"],
+  errorMessage: String,
+  details: Mixed,     // sanitized body/query/params snapshot
   createdAt: Date
 }
 
@@ -959,27 +965,45 @@ Multi-functional personal website includes:
 // { userId: 1 } unique
 ```
 
+### 4.23 user_follows
+
+```js
+{
+  _id: ObjectId,
+  followerId: ObjectId,
+  followingId: ObjectId,
+  createdAt: Date,
+  updatedAt: Date
+}
+
+// Indexes:
+// { followerId: 1, followingId: 1 } unique
+// { followingId: 1, createdAt: -1 }
+// { followerId: 1, createdAt: -1 }
+```
+
 ---
 
 ## 5. API Endpoints
 
-> **Implementation snapshot (2026-03-24):** Auth/Users/Blog/Wallet/Subscriptions/Notifications/Health plus Store MVP (`products`, `orders`) and `cart` are implemented.
-> Endpoints listed below that are not yet in code are marked as **(planned)** in description.
+> **Implementation snapshot (2026-03-25):** Auth (with 2FA step-up), Users, Blog, Wallet/Payment, Subscriptions, Notifications (HTTP + WS), Store/Orders/Reviews, Cart, Tickets (`/tickets`, `/admin/tickets`), Admin dashboard/audit, Social and Gamification MVP are implemented.
+> Endpoints not in code are marked as **(planned)**.
 
 ### 5.1 Auth
 
 | Method | Path                  | Auth   | Description     |
 | ------ | --------------------- | ------ | --------------- |
 | POST | /auth/register | Public | Register |
-| POST | /auth/login | Public | Sign in |
+| POST | /auth/login | Public | Sign in (returns challenge when user enabled 2FA) |
 | POST   | /auth/refresh         | Public | Refresh token   |
 | POST | /auth/logout | User | Sign out |
+| GET | /auth/me | User | Current user |
 | POST | /auth/forgot-password | Public | Send reset email |
 | POST   | /auth/reset-password  | Public | Reset password  |
 | POST | /auth/verify-email | Public | Email authentication |
-| POST | /auth/2fa/enable | User | Enable 2FA (planned) |
-| POST | /auth/2fa/verify | User | 2FA Authentication (planned) |
-| POST | /auth/2fa/disable | User | Turn off 2FA (planned) |
+| POST | /auth/2fa/enable | User | Create TOTP setup challenge (implemented) |
+| POST | /auth/2fa/verify | Public | Verify setup/login 2FA token (implemented) |
+| POST | /auth/2fa/disable | User | Disable 2FA with password + factor (implemented) |
 
 ### 5.2 Users
 
@@ -987,12 +1011,20 @@ Multi-functional personal website includes:
 | ------ | -------------------- | ------ | ------------------- |
 | GET | /users/me | User | Personal profile (implemented) |
 | PATCH | /users/me | User | Update profile (implemented) |
-| GET | /users/:username | Public | Public profile (planned) |
-| GET | /users/:id/followers | Public | List of followers (planned) |
-| GET | /users/:id/following | Public | Following list (planned) |
-| POST   | /users/:id/follow    | User   | Follow (planned) |
-| DELETE | /users/:id/follow    | User   | Unfollow (planned) |
-| GET | /users/leaderboard | Public | Ranking (planned) |
+| PATCH | /users/me/avatar | User | Upload avatar (implemented) |
+| GET | /users/profile | User | Profile alias (implemented) |
+| PATCH | /users/profile | User | Update profile alias (implemented) |
+| GET | /users/:username | Public | Public profile (implemented) |
+| GET | /users | Admin | User listing (implemented) |
+| GET | /users/:id | Admin | User detail (implemented) |
+| PATCH | /users/:id | Admin | Admin update user fields (implemented) |
+| PATCH | /users/:id/role | Admin | Change role (implemented) |
+| PATCH | /users/:id/status | Admin | Enable/disable user (implemented) |
+| GET | /users/:id/followers | User | List of followers (implemented) |
+| GET | /users/:id/following | User | Following list (implemented) |
+| POST   | /users/:id/follow    | User   | Follow (implemented) |
+| DELETE | /users/:id/follow    | User   | Unfollow (implemented) |
+| GET | /users/leaderboard | User | Ranking (implemented) |
 
 ### 5.3 Blog — Posts
 
@@ -1000,11 +1032,15 @@ Multi-functional personal website includes:
 | ------ | ------------------- | ------------ | ------------------- |
 | GET    | /posts              | Public       | Listing (published) |
 | GET | /posts/:slug | Public | Article details |
+| GET | /posts/me/:id | Author+ | My post detail (implemented) |
 | POST | /posts | Author+ | Create draft |
+| POST | /posts/:id/cover-image | Author+ | Upload cover image (implemented) |
+| POST | /posts/block-image | Author+ | Upload editor block image (implemented) |
 | PATCH | /posts/:id | Author (own) | Update post |
 | DELETE | /posts/:id | Author (own) | Delete post |
 | POST | /posts/:id/submit | Author (own) | Submit for approval |
 | POST   | /posts/:id/like     | User         | Toggle like         |
+| GET | /posts/:id/like-status | User | My like status (implemented) |
 | POST   | /posts/:id/bookmark | User         | Toggle bookmark     |
 | GET | /posts/me | Author+ | My article |
 
@@ -1016,6 +1052,8 @@ Multi-functional personal website includes:
 | POST | /posts/:postId/comments | User | Create a comment |
 | PATCH | /comments/:id | User (own) | Edit comment |
 | DELETE | /comments/:id | User (own) | Delete comments |
+| POST | /comments/:id/like | User | Toggle like comment (implemented) |
+| PATCH | /comments/:id/hide | Staff/Admin | Hide/unhide comment (implemented) |
 
 ### 5.5 Blog — Polls
 
@@ -1031,16 +1069,17 @@ Multi-functional personal website includes:
 | GET | /moderation/posts | Staff/Admin | Post review queue (implemented) |
 | PATCH | /moderation/posts/:id/approve | Staff/Admin | Browse articles (implemented) |
 | PATCH | /moderation/posts/:id/reject | Staff/Admin | Reject article (implemented) |
-| GET | /moderation/stats | Staff/Admin | Browsing statistics (planned) |
+| GET | /moderation/stats | Staff/Admin | Browsing statistics (implemented) |
 
 ### 5.7 Categories
 
 | Method | Path            | Auth   | Description |
 | ------ | --------------- | ------ | ----------- |
 | GET | /categories | Public | List |
-| POST | /categories | Admin | Create |
-| PATCH | /categories/:id | Admin | Update |
-| DELETE | /categories/:id | Admin | Delete |
+| GET | /categories/admin/all | Staff/Admin | Admin listing (implemented) |
+| POST | /categories | Staff/Admin | Create |
+| PATCH | /categories/:id | Staff/Admin | Update |
+| DELETE | /categories/:id | Staff/Admin | Delete |
 
 ### 5.8 Tags
 
@@ -1048,18 +1087,22 @@ Multi-functional personal website includes:
 | ------ | ----------------- | ------ | ------------------- |
 | GET | /tags | Public | List (popular) |
 | GET | /tags/:slug/posts | Public | Articles by tag |
+| GET | /tags/admin/all | Staff/Admin | Admin listing (implemented) |
+| POST | /tags | Staff/Admin | Create tag (implemented) |
+| PATCH | /tags/:id | Staff/Admin | Update tag (implemented) |
+| DELETE | /tags/:id | Staff/Admin | Delete tag (implemented) |
 
-### 5.9 Wiki
+### 5.9 Wiki (implemented)
 
 | Method | Path              | Auth        | Description                |
 | ------ | ----------------- | ----------- | -------------------------- |
-| GET | /wiki | Public | List of articles |
-| GET | /wiki/:slug | Public | Article details |
-| POST | /wiki | Staff/Admin | Create article |
-| PATCH | /wiki/:id | Staff/Admin | Update (create new version) |
-| DELETE | /wiki/:id | Admin | Delete/archive |
-| POST   | /wiki/:id/helpful | User        | Vote helpful (yes/no)      |
-| GET    | /wiki/categories  | Public      | Wiki categories            |
+| GET | /wiki | Public | List of articles (implemented) |
+| GET | /wiki/:slug | Public | Article details (implemented) |
+| POST | /wiki | Staff/Admin | Create article (implemented) |
+| PATCH | /wiki/:id | Staff/Admin | Update/create new version (implemented) |
+| DELETE | /wiki/:id | Admin | Delete/archive (implemented) |
+| POST   | /wiki/:id/helpful | User        | Vote helpful (implemented) |
+| GET    | /wiki/categories  | Public      | Wiki categories (implemented) |
 
 ### 5.10 Store — Products
 
@@ -1071,6 +1114,8 @@ Multi-functional personal website includes:
 | PATCH | /products/:id | Staff/Admin | Update (implemented) |
 | DELETE | /products/:id   | Staff/Admin | Archive (implemented) |
 | GET | /products/me | Staff/Admin | Store products (implemented) |
+| POST | /products/:id/file | Staff/Admin | Upload digital product asset (implemented) |
+| POST | /products/:id/submit-review | Staff/Admin | Submit product for moderation (implemented) |
 
 ### 5.11 Store — Orders
 
@@ -1079,19 +1124,25 @@ Multi-functional personal website includes:
 | POST | /orders | User | Create direct order (implemented) |
 | GET | /orders/me | User | My order (buyer) (implemented) |
 | GET | /orders/:id | User (buyer)/Staff/Admin | Single details (implemented) |
-| POST | /orders/:id/complete | User (buyer) | Confirmation complete (planned) |
-| POST | /orders/:id/cancel | User (buyer) | Cancel order (planned) |
-| POST | /orders/:id/refund-request | User (buyer) | Request a Refund (planned) |
-| GET    | /orders/:id/download       | User (buyer)             | Download file (planned)  |
+| POST | /orders/:id/complete | User (buyer) | Confirmation complete (implemented, FE surfaced) |
+| POST | /orders/:id/cancel | User (buyer) | Cancel order request (implemented, ticket-based, FE surfaced) |
+| POST | /orders/:id/refund-request | User (buyer) | Refund request (implemented, ticket-based, FE surfaced) |
+| POST | /orders/:id/quote/accept | User (buyer) | Accept custom-order quote (implemented) |
+| POST | /orders/:id/quote/reject | User (buyer) | Reject custom-order quote (implemented) |
+| GET    | /orders/:id/download       | User (buyer)             | Download file (implemented)  |
+| GET | /orders/download/email/:token | Public | Download redirect via signed email token (implemented) |
 
 ### 5.12 Store — Management Orders
 
 | Method | Path                      | Auth        | Description           |
 | ------ | ------------------------- | ----------- | --------------------- |
 | GET | /store/orders | Staff/Admin | Store orders (implemented) |
-| PATCH | /store/orders/:id/status | Staff/Admin | Status Update (planned) |
-| POST | /store/orders/:id/quote | Staff/Admin | Custom order quote (planned) |
-| POST | /store/orders/:id/deliver | Staff/Admin | Upload delivery file (planned) |
+| PATCH | /store/orders/:id/status | Staff/Admin | Status Update (implemented, strict transition) |
+| GET | /store/products/pending-review | Staff/Admin | Product moderation queue (implemented) |
+| POST | /store/products/:id/approve | Staff/Admin | Approve pending product (implemented) |
+| POST | /store/products/:id/reject | Staff/Admin | Reject pending product (implemented) |
+| POST | /store/orders/:id/quote | Staff/Admin | Custom order quote (implemented) |
+| POST | /store/orders/:id/deliver | Staff/Admin | Upload delivery file (implemented) |
 | GET    | /store/dashboard          | Staff/Admin | Revenue dashboard (implemented, MVP) |
 
 ### 5.13 Store — Reviews
@@ -1132,22 +1183,41 @@ Multi-functional personal website includes:
 
 | Method | Path                  | Auth             | Description     |
 | ------ | --------------------- | ---------------- | --------------- |
-| POST | /tickets | User | Create ticket (planned) |
-| GET | /tickets/me | User | My Tickets (planned) |
-| GET | /tickets/:id | User (own)/Staff | Details (planned) |
-| POST | /tickets/:id/messages | User/Staff | Send message (planned) |
-| PATCH | /tickets/:id/close | User (own) | Close ticket (planned) |
-| POST | /tickets/:id/reopen | User (own) | Reopen (planned) |
-| POST | /tickets/:id/rate | User (own) | Reviews (planned) |
+| POST | /tickets | User | Create ticket (implemented) |
+| GET | /tickets/me | User | My Tickets (implemented) |
+| GET | /tickets/:id | User (own)/Staff/Admin | Details (implemented) |
+| POST | /tickets/:id/messages | User/Staff/Admin | Send message (implemented) |
+| PATCH | /tickets/:id/close | User (own) | Close ticket (implemented) |
+| POST | /tickets/:id/reopen | User (own) | Reopen (implemented) |
+| POST | /tickets/:id/rate | User (own) | Satisfaction rating (implemented) |
 
 ### 5.17 Tickets — Staff
 
 | Method | Path                             | Auth        | Description    |
 | ------ | -------------------------------- | ----------- | -------------- |
-| GET | /admin/tickets | Staff/Admin | All tickets (planned) |
-| PATCH | /admin/tickets/:id/assign | Staff/Admin | Assignment (planned) |
-| PATCH | /admin/tickets/:id/status | Staff/Admin | Change status (planned) |
-| POST | /admin/tickets/:id/internal-note | Staff/Admin | Internal Notes (planned) |
+| GET | /admin/tickets | Staff/Admin | Admin: all tickets, Staff: assigned-to-self + unassigned (implemented) |
+| GET | /admin/tickets/assignees | Staff/Admin | List active assignable staff/admin (implemented) |
+| PATCH | /admin/tickets/:id/assign | Staff/Admin | Admin reassign any, Staff claim unassigned to self only (implemented) |
+| PATCH | /admin/tickets/:id/status | Staff/Admin | Admin full status control, Staff operational statuses on self-assigned only (implemented) |
+| POST | /admin/tickets/:id/internal-note | Staff/Admin | Internal notes; staff only when assigned to self (implemented) |
+
+### 5.17.1 Tickets WebSocket
+
+- Namespace: `/tickets` (configurable by `WS_TICKETS_NAMESPACE`)
+- Auth handshake: `auth.token = "<accessToken>"` or `"Bearer <accessToken>"`
+- Client events:
+  - `tickets:subscribe`
+  - `tickets:unsubscribe`
+- Server events:
+  - `tickets:ready`
+  - `tickets:subscribed`
+  - `tickets:message`
+  - `tickets:ticket-updated`
+  - `tickets:error`
+- Room visibility:
+  - Author joins `ticket:{id}:public`
+  - Staff/Admin joins `ticket:{id}:internal`
+  - Internal notes are pushed to internal room only
 
 ### 5.18 Notifications
 
@@ -1158,14 +1228,25 @@ Multi-functional personal website includes:
 | POST   | /notifications/me/:id/read     | User | Mark one as read    |
 | POST   | /notifications/me/read-all     | User | Mark all as read    |
 
+### 5.18.1 Notifications WebSocket
+
+- Namespace: `/notifications`
+- Auth handshake: `auth.token = "<accessToken>"` or `"Bearer <accessToken>"`
+- Server push events:
+  - `notifications:ready`
+  - `notifications:new`
+  - `notifications:unread-count`
+  - `notifications:read`
+  - `notifications:read-all`
+  - `notifications:error`
+
 ### 5.19 Gamification
 
 | Method | Path            | Auth   | Description    |
 | ------ | --------------- | ------ | -------------- |
 | GET | /badges | Public | All badges |
 | GET | /badges/me | User | Badges reached |
-| GET    | /referrals/me   | User   | Referral stats |
-| GET    | /referrals/code | User   | Referral code  |
+| GET    | /users/leaderboard | User | Gamification leaderboard |
 
 ### 5.20 Subscription
 
@@ -1183,24 +1264,24 @@ Multi-functional personal website includes:
 
 | Method | Path               | Auth        | Description              |
 | ------ | ------------------ | ----------- | ------------------------ |
-| POST | /upload/image | User | Upload photos (planned endpoint; currently blog/users upload via feature routes) |
-| POST | /upload/file | Staff/Admin | Upload product files (planned) |
-| POST   | /upload/attachment | User        | Upload attachment ticket (planned) |
+| POST | /upload/image | User | Upload photos (implemented) |
+| POST | /upload/file | Staff/Admin | Upload product files (implemented) |
+| POST   | /upload/attachment | User        | Upload attachment ticket (implemented) |
 
 ### 5.22 Admin
 
 | Method | Path                          | Auth  | Description      |
 | ------ | ----------------------------- | ----- | ---------------- |
-| GET    | /admin/dashboard/stats        | Admin | Overview numbers (planned) |
-| GET    | /admin/dashboard/revenue      | Admin | Revenue chart (planned) |
-| GET    | /admin/dashboard/users-growth | Admin | User growth (planned) |
-| GET    | /admin/users                  | Admin | List all users (planned; current code uses /users with admin role) |
-| PATCH | /admin/users/:id/role | Admin | Change role (planned; current code uses /users/:id/role) |
-| POST   | /admin/users/:id/ban          | Admin | Ban user (planned) |
-| POST   | /admin/users/:id/unban        | Admin | Unban (planned) |
+| GET    | /admin/dashboard/stats        | Admin | Overview numbers (implemented) |
+| GET    | /admin/dashboard/revenue      | Admin | Revenue chart (implemented) |
+| GET    | /admin/dashboard/users-growth | Admin | User growth (implemented) |
+| GET    | /admin/users                  | Admin | List all users (implemented alias) |
+| PATCH | /admin/users/:id/role | Admin | Change role (implemented alias) |
+| POST   | /admin/users/:id/ban          | Admin | Ban user (implemented) |
+| POST   | /admin/users/:id/unban        | Admin | Unban (implemented) |
 | POST | /admin/wallet/adjust | Admin | Add/subtract coins (implemented) |
-| GET    | /admin/wallet/stats           | Admin | Wallet stats (planned) |
-| GET    | /admin/audit-logs             | Admin | Audit logs (planned) |
+| GET    | /admin/wallet/stats           | Admin | Wallet stats (implemented) |
+| GET    | /admin/audit-logs             | Admin | Audit logs (implemented) |
 
 ### 5.23 Cart
 
@@ -1213,7 +1294,7 @@ Multi-functional personal website includes:
 | DELETE | /cart              | User | Clear cart (implemented) |
 | POST   | /cart/checkout     | User | Checkout cart to order (implemented) |
 
-**Total target endpoints: ~101 (includes planned)**
+**Total tracked endpoints: 110+ (includes planned)**
 
 ---
 
@@ -1240,6 +1321,8 @@ server/
     │   ├── jwt.config.ts
     │   ├── mail.config.ts
     │   ├── minio.config.ts
+    │   ├── store.config.ts
+    │   ├── two-factor.config.ts
     │   └── wallet.config.ts
     │
     ├── database/
@@ -1300,7 +1383,20 @@ server/
     │   ├── notifications.module.ts
     │   ├── notifications.controller.ts
     │   ├── notifications.service.ts
+    │   ├── notifications.gateway.ts
     │   └── schemas/
+    │
+    ├── tickets/
+    │   └── ...
+    │
+    ├── admin/
+    │   └── ...
+    │
+    ├── social/
+    │   └── ...
+    │
+    ├── gamification/
+    │   └── ...
     │
     ├── subscriptions/
     │   ├── subscriptions.module.ts
@@ -1320,7 +1416,7 @@ server/
         └── ...
 ```
 
-> Note: Store foundation (`products`, `orders`) and `cart` are now present in backend MVP. Tickets, wiki, gamification, social, and realtime queue modules remain roadmap scope.
+> Note: Backend now has `tickets`, `admin`, `social`, `gamification`, realtime `notifications`, and `wiki` modules. Redis/Bull queue and multi-instance realtime infra remain roadmap.
 
 ---
 
@@ -1406,38 +1502,38 @@ server/
 **Tasks:**
 
 - [x] Products module: CRUD (staff/admin), listing, search (MVP)
-- [ ] Product moderation (pending_review)
+- [x] Product moderation (pending_review)
 - [x] Orders module: create → wallet.purchase(), status flow (paid state MVP)
 - [x] Cart module: get/add/update/remove/clear/checkout (MVP)
-- [ ] Digital product: auto-deliver download link
-- [ ] Custom order: quote flow (staff/admin quote → buyer accept)
-- [ ] Delivery files upload
+- [x] Digital product: auto-deliver download link
+- [x] Custom order: quote flow (staff/admin quote → buyer accept)
+- [x] Delivery files upload
 - [x] Store dashboard: orders, revenue stats (staff/admin) (MVP summary)
 - [x] Reviews module: product + store reviews, aspects, staff/admin reply (MVP)
-- [ ] Auto-complete cron (7 days after delivery)
-- [ ] Platform fee calculation
-- [ ] Secure file download (presigned URL)
+- [x] Auto-complete cron (7 days after delivery)
+- [x] Platform fee calculation
+- [x] Secure file download (presigned URL)
 
-**Result:** Partial delivery (MVP): products + buy-now orders + cart checkout + review APIs + basic store dashboard are live; quote/delivery/auto-complete/platform-fee/download flows are pending.
+**Result:** Delivered beyond MVP: products + buy-now orders + cart checkout + review APIs + store dashboard + moderation + quote/delivery + auto-complete + platform-fee settlement + secure download are live. Buyer `complete/cancel/refund-request` flows are now implemented (cancel/refund as ticket-based requests).
 
 ---
 
 ### Phase 5 — Tickets + Notifications + Mail (6-7 days)
 
-**Goal:** Email + notifications foundation (tickets/realtime remain pending)
+**Goal:** Deliver support + realtime notifications foundation
 
 **Tasks:**
 
-- [ ] Tickets module: create, messages, assign, status, SLA
-- [ ] Ticket admin: assign, internal notes, escalate
-- [ ] Satisfaction rating
+- [x] Tickets module: create, messages, assign, status, SLA
+- [x] Ticket admin: assign, internal notes, escalate
+- [x] Satisfaction rating
 - [ ] Mail module: templates (HBS), async send via Bull queue
 - [x] Email: verify, reset password, subscription reminders/renewal alerts
-- [x] Notifications module: create, list, mark read (subscription scope)
-- [ ] WebSocket gateway: realtime push
-- [ ] Integrate notifications into old modules (blog, store, wallet)
+- [x] Notifications module: create, list, mark read
+- [x] WebSocket gateway: realtime push (`/notifications`)
+- [x] Integrate notifications into old modules (blog, store, wallet)
 
-**Result:** Partial delivery: email + subscription notification feed done; tickets/realtime still pending.
+**Result:** Delivered (tickets + realtime notifications + integration hooks). Durable queue (Bull/Redis) remains pending.
 
 ---
 
@@ -1447,24 +1543,24 @@ server/
 
 **Tasks:**
 
-- [ ] Add gamification fields to User schema
-- [ ] XP service: addXp, checkLevelUp
-- [ ] Badges: templates, checkAndAward automatically
-- [ ] Leaderboard: pre-computed snapshots (cron)
+- [x] Add gamification fields to User schema
+- [x] XP service: addXp, checkLevelUp
+- [x] Badges: templates, checkAndAward automatically
+- [x] Leaderboard: pre-computed snapshots (cron)
 - [ ] Referral system: code, track, reward
-- [ ] Social: follow/unfollow, profile page data
+- [x] Social: follow/unfollow, profile page data (API scope)
 - [x] Subscription module: plans, purchase, cancel/auto-renew, history (quota-first)
 - [ ] Subscription perks: bonus coin, discount, exclusive content
 - [x] Subscription auto-renew/expiry cron with reminders + grace period
-- [ ] Wiki/Knowledge base module
-- [ ] 2FA: TOTP enable/verify/disable, backup codes
-- [ ] Admin dashboard: stats, revenue, user growth, audit logs
-- [ ] Seeder: badges, categories
+- [x] Wiki/Knowledge base module
+- [x] 2FA: TOTP enable/verify/disable, backup codes
+- [x] Admin dashboard: stats, revenue, user growth, audit logs
+- [x] Seeder: badges (categories already available)
 - [ ] Rate limiting fine-tune
 - [ ] Security review
 - [ ] Complete API documentation
 
-**Result:** In progress; only subscription core is delivered in this phase scope.
+**Result:** In progress; core backend delivered for gamification/social/2FA/admin/wiki. Remaining: referral, subscription perks, infra hardening.
 
 ---
 
@@ -1474,9 +1570,9 @@ server/
 Phase 1 ████████░░░░░░░░░░░░░░░░░░░░░░ Week 1-2 (Foundation)
 Phase 2 ████████████████░░░░░░░░░░░░░░ Week 2-3 (Blog) ✅
 Phase 3 ░░░░░░░░░░░░░░████████░░░░░░░░ Week 4-5 (Wallet) ✅
-Phase 4 ░░░░░░░░░░░░░░░░░░░░░░████████ Week 5-7 (Store)
-Phase 5 ░░░░░░░░░░░░░░░░░░░░░░░░░░████ Week 7-8 (Support)
-Phase 6 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██ Week 9-11 (Polish)
+Phase 4 ░░░░░░░░░░░░░░░░░░░░░░████████ Week 5-7 (Store) ✅
+Phase 5 ░░░░░░░░░░░░░░░░░░░░░░░░░░████ Week 7-8 (Support) ✅
+Phase 6 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░██ Week 9-11 (Polish) ▶
 
 Total: ~11 weeks (2.5-3 months)
 Actual: ~14-16 weeks (3.5-4 months) with debug + testing
@@ -1495,14 +1591,14 @@ Buyer chooses product
 POST /orders (productId, quantity)
     │
     ▼
-Test server:
+Server checks:
 ├── Product active? Stock enough?
 ├── Does Buyer have enough coins?
-└── maxPerUser not exceeded?
+└── Product has digital asset?
     │
     ▼
 MongoDB Transaction:
-├── Minus coin buyer (wallet.balance -= totalAmount)
+├── Minus coin buyer (wallet.balance -= total)
 ├── Create transaction (type: "purchase")
 ├── Create order (status: "paid")
 ├── Reduce stock
@@ -1510,18 +1606,17 @@ MongoDB Transaction:
     │
     ▼
 Order status: "delivered"
-├── Generate presigned download URL
-├── Notify buyer (order_delivered)
-└── Set autoCompleteAt = now + 7 days
+├── Save deliveryFiles from product digital asset
+├── Dispatch delivery email link (signed token)
+└── Set autoCompleteAt = deliveredAt + 7 days
     │
     ▼
-Cron job (or buyer click complete):
+Cron auto-complete:
 ├── Status → "completed"
-├── Add coin admin store (sellerReceives = total - platformFee)
+├── Settlement: sellerReceives = total - platformFee
 ├── Create transaction (type: "sale_income")
 ├── Create transaction (type: "platform_fee")
-├── Update store statistics
-└── Notify admin/staff (order_completed)
+└── Notify buyer + store operators (`store_order_auto_completed`)
 ```
 
 ### 8.2 Order Flow — Custom Order
@@ -1533,7 +1628,8 @@ Buyer fills out the request form
 POST /orders (productId, customData)
     │
     ▼
-Order status: "pending" → "paid" (minus coins at base price)
+Order status: "pending" (chưa trừ coin)
+├── auto-bootstrap ticket thread linked with order
     │
     ▼
 Staff/Admin view requests and quotes:
@@ -1541,14 +1637,15 @@ POST /store/orders/:id/quote (price, estimatedDays, note)
     │
     ▼
 Order status: "quoted"
-├── Notify buyer (quote_received)
+├── Notify buyer (`store_quote_created`)
     │
     ▼
 Buyer accepts or rejects:
-├── Accept → status: "quote_accepted" → "processing"
-│ └── Deduct additional coins if the price is higher than the base
-│ or refund if the price is lower
-└── Reject → status: "cancelled" → refund coins
+├── Accept (/orders/:id/quote/accept)
+│ ├── wallet.purchase(quote.priceAmount)
+│ └── status: "quote_accepted" → "processing"
+└── Reject (/orders/:id/quote/reject)
+  └── status: "cancelled" (no refund because no upfront charge)
     │
     ▼
 Staff/Admin finishes processing, upload file:
@@ -1556,7 +1653,7 @@ POST /store/orders/:id/deliver
     │
     ▼
 Order status: "delivered"
-└── (continue as digital flow)
+└── Cron auto-complete → "completed" + settlement + notify
 ```
 
 ### 8.3 Wallet Deposit Flow
@@ -1667,7 +1764,7 @@ Return order + empty cart
 - **Refresh Token:** Long-lived (7 days), rotation on use
 - **2FA (TOTP):** Google Authenticator compatible
 - **Backup codes:** 10 codes, single-use, hashed storage
-- **Password:** bcrypt (12 rounds)
+- **Password:** bcrypt (10 rounds)
 - **Email verification** required
 
 ### 9.2 Authorization
@@ -1695,10 +1792,12 @@ Return order + empty cart
 
 ### 9.5 API Security
 
-- **Rate limiting:** ThrottlerModule (per IP, per user)
+- **Rate limiting (runtime):** custom in-memory limiter for `/auth/*` and `/payment/*`
+- **Global ThrottlerModule:** planned
 - **CORS:** Whitelist frontend origin
-- **Helmet:** Security headers
-- **Request timeout:** 30s default
+- **Security headers:** custom middleware
+- **Helmet:** planned
+- **Request timeout global 30s:** planned (not enforced globally yet)
 - **Payload size limit:** Configurable per route
 
 ### 9.6 Data Protection
@@ -1712,6 +1811,94 @@ Return order + empty cart
 
 ---
 
+## 10. Frontend Readiness
+
+### 10.1 FE Integration Priority (Updated 2026-03-26)
+
+1. Auth + Profile
+- Login form hỗ trợ 2 mode response:
+  - Normal: `accessToken + refreshToken`
+  - 2FA challenge: `requiresTwoFactor=true`, `twoFactorToken`, `expiresInSeconds`
+- Build screens:
+  - `/auth/2fa/enable` (setup challenge + QR/manual key)
+  - `/auth/2fa/verify` (challenge sau login)
+  - `/settings/security` (disable 2FA)
+
+2. Notification Center (HTTP + WebSocket)
+- Kết nối Socket.IO namespace `/notifications` với `handshake.auth.token`.
+- Subscribe event: `notifications:ready`, `notifications:new`, `notifications:unread-count`, `notifications:read`, `notifications:read-all`, `notifications:error`.
+- FE state sync:
+  - list notification từ REST
+  - unread badge realtime
+  - optimistic UI cho mark-read/read-all
+
+3. Tickets UI ✅
+- User pages:
+  - `/tickets`
+  - `/tickets/:id`
+- compose/reply/rate/reopen/close
+- realtime subscribe `/tickets` + dedupe message merge + attachment upload (`/upload/attachment`)
+- Staff/Admin pages:
+  - `/tickets` (role-sensitive dashboard behavior)
+  - admin full assignment controls
+  - staff claim-to-self + operational status/internal-note on self-assigned
+- Custom-order flow: mở ticket thread từ order detail.
+
+4. Store Order Actions ✅
+- Buyer order detail:
+  - `/orders/:id/complete`
+  - `/orders/:id/cancel`
+  - `/orders/:id/refund-request`
+- Staff store order detail:
+  - `PATCH /store/orders/:id/status` with strict transition options by current status
+
+5. Public Wiki ✅
+- `/knowledge`: list/search/filter via `/wiki` + `/wiki/categories`
+- `/knowledge/:slug`: detail via `/wiki/:slug`
+- Helpful vote action for authenticated users via `/wiki/:id/helpful`
+
+6. Admin Console
+- `/admin/dashboard`:
+  - `stats`
+  - `revenue (from/to/groupBy)`
+  - `users-growth (from/to/groupBy)`
+- `/admin/audit-logs`:
+  - filter `action`, `severity`, `userId`, `from`, `to`
+  - pagination
+
+7. Social + Gamification
+- `/leaderboard`
+- `/users/:id` social tab (followers/following)
+- follow/unfollow actions
+- badges:
+  - `/badges`
+  - `/badges/me`
+
+### 10.2 Contract Notes For FE
+
+- `POST /auth/login` có union response; FE phải branch logic theo `requiresTwoFactor`.
+- `POST /auth/2fa/verify` dùng cho cả setup token và login challenge token.
+- Notification WS hiện là single-instance (chưa Redis adapter), FE vẫn xử lý reconnect bình thường.
+- Ticket WS contract:
+  - namespace `/tickets`
+  - client emits: `tickets:subscribe`, `tickets:unsubscribe`
+  - server emits: `tickets:ready`, `tickets:subscribed`, `tickets:message`, `tickets:ticket-updated`, `tickets:error`
+- Audit logs chỉ ghi mutation endpoints (`POST/PUT/PATCH/DELETE`), không kỳ vọng log cho GET.
+
+### 10.3 Frontend Definition of Done
+
+- [ ] Auth + 2FA UX hoàn chỉnh (happy path + expired/invalid challenge cases)
+- [ ] Realtime notifications chạy ổn định, unread count đồng bộ REST/WS
+- [x] Ticket conversation UX usable trên mobile + desktop (REST send + WS push + attachment upload)
+- [x] Buyer order action UX (complete/cancel/refund-request) + ticket-linked feedback
+- [x] Staff store order status update UI theo transition backend
+- [x] Public wiki list/detail/helpful vote UI
+- [ ] Admin dashboard + audit filters/pagination hoạt động đúng query params
+- [ ] Social follow + leaderboard + badges hiển thị chuẩn
+- [ ] E2E smoke cho các luồng chính: login(2FA), order→ticket, notify realtime, admin stats
+
+---
+
 ## Changelog
 
 | Date       | Version | Changes                                                      |
@@ -1721,6 +1908,8 @@ Return order + empty cart
 | 2026-03-18 | 1.2     | Wallet module delivered: coin balances, transactions, PayOS deposit flow, anti-fraud and admin adjust APIs |
 | 2026-03-19 | 1.3     | Subscription revamp + notifications: Free/Pro/VIP billing cycles, wallet-based purchase, auto-renew, reminder/renewal email + in-app notifications |
 | 2026-03-24 | 1.4     | Restored alerts module + health runtime wiring, implemented Store MVP (`products`, `orders`, `reviews`, `store dashboard`), added cart APIs/schema/flow and updated roadmap markers (`planned`) in endpoint table |
+| 2026-03-25 | 1.5     | Delivered backend upgrades: 2FA step-up login (TOTP + backup codes), notifications WS + blog/store/wallet integrations, tickets/admin tickets, admin dashboard + persistent audit logs, social follow APIs, gamification badges/leaderboard + seed/backfill scripts; added frontend readiness checklist |
+| 2026-03-26 | 1.6     | Delivered ticket realtime WS (`/tickets`) + role-sensitive ticket operations + auto-assign policy; FE ticket detail realtime/attachments; FE buyer order complete/cancel/refund-request actions; FE staff store status update action; public wiki list/detail/helpful vote UI; refreshed readiness checklist |
 
 ---
 

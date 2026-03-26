@@ -9,6 +9,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { MongoExceptionFilter } from './common/filters/mongo-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
@@ -16,6 +17,8 @@ import jwtConfig from './config/jwt.config';
 import minioConfig from './config/minio.config';
 import mailConfig from './config/mail.config';
 import walletConfig from './config/wallet.config';
+import storeConfig from './config/store.config';
+import twoFactorConfig from './config/two-factor.config';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { BlogModule } from './blog/blog.module';
@@ -28,6 +31,12 @@ import { ProductsModule } from './store/products/products.module';
 import { OrdersModule } from './store/orders/orders.module';
 import { ReviewsModule } from './store/reviews/reviews.module';
 import { CartModule } from './cart/cart.module';
+import { TicketsModule } from './tickets/tickets.module';
+import { AdminModule } from './admin/admin.module';
+import { GamificationModule } from './gamification/gamification.module';
+import { SocialModule } from './social/social.module';
+import { WikiModule } from './wiki/wiki.module';
+import { UploadModule } from './upload/upload.module';
 
 @Module({
   imports: [
@@ -40,6 +49,8 @@ import { CartModule } from './cart/cart.module';
         minioConfig,
         mailConfig,
         walletConfig,
+        storeConfig,
+        twoFactorConfig,
       ],
     }),
     ScheduleModule.forRoot(),
@@ -53,6 +64,12 @@ import { CartModule } from './cart/cart.module';
     OrdersModule,
     ReviewsModule,
     CartModule,
+    TicketsModule,
+    AdminModule,
+    GamificationModule,
+    SocialModule,
+    WikiModule,
+    UploadModule,
     UsersModule,
     AuthModule,
     BlogModule,
@@ -75,6 +92,10 @@ import { CartModule } from './cart/cart.module';
     {
       provide: APP_FILTER,
       useClass: HttpExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditLogInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

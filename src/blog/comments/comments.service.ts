@@ -46,6 +46,8 @@ type CommentResponse = {
   author: CommentAuthor | null;
 };
 
+const HIDDEN_BY_STAFF_PLACEHOLDER = '\u1ea8n b\u1edfi staff';
+
 @Injectable()
 export class CommentsService {
   constructor(
@@ -62,7 +64,6 @@ export class CommentsService {
     const filter = {
       postId: new Types.ObjectId(postId),
       isDeleted: false,
-      isHidden: false,
     };
 
     const [data, total] = await Promise.all([
@@ -195,7 +196,7 @@ export class CommentsService {
         },
       );
 
-      return { liked: false };
+      return { liked: false, likesCount: Math.max(comment.likesCount - 1, 0) };
     }
 
     await this.commentModel.updateOne(
@@ -206,7 +207,7 @@ export class CommentsService {
       },
     );
 
-    return { liked: true };
+    return { liked: true, likesCount: comment.likesCount + 1 };
   }
 
   async hide(
@@ -268,8 +269,12 @@ export class CommentsService {
           : (comment as unknown as Omit<CommentResponse, 'author'>);
 
       const author = authorMap.get(comment.authorId.toString());
+      const isHidden = normalizedComment.isHidden === true;
       return {
         ...normalizedComment,
+        content: isHidden
+          ? HIDDEN_BY_STAFF_PLACEHOLDER
+          : normalizedComment.content,
         id: normalizedComment._id.toString(),
         author: author
           ? author
@@ -289,3 +294,4 @@ export class CommentsService {
     return enrichedComment;
   }
 }
+

@@ -1,4 +1,5 @@
 import {
+  Optional,
   BadRequestException,
   ConflictException,
   Injectable,
@@ -9,14 +10,17 @@ import { ConfigService } from '@nestjs/config';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { MongoTransactionService } from '../common/services/mongo-transaction.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AdminAdjustWalletDto } from './dto/admin-adjust-wallet.dto';
 import { CreateDepositDto } from './dto/create-deposit.dto';
-import { WalletTransactionQueryDto } from './dto/wallet-transaction-query.dto';
 import {
-  DepositRequestResponse,
-  DepositService,
-} from './deposit.service';
+  WalletAdminStatsQueryDto,
+  WalletStatsGroupBy,
+} from './dto/wallet-admin-stats-query.dto';
+import { WalletTransactionQueryDto } from './dto/wallet-transaction-query.dto';
+import { DepositRequestResponse, DepositService } from './deposit.service';
 import {
   PayosReturnStatusPayload,
   PayosReturnSyncPayload,
@@ -58,6 +62,7 @@ type WalletSummary = WalletState & {
   id: string;
   _id: string;
   userId: string;
+  coinToVndRate: number;
   availableBalance: number;
   pendingBalance: number;
   totalDeposited: number;
@@ -78,6 +83,8 @@ export class WalletService {
     private readonly mongoTransactionService: MongoTransactionService,
     private readonly depositService: DepositService,
     private readonly paymentReturnService: PaymentReturnService,
+    @Optional()
+    private readonly notificationsService?: NotificationsService,
   ) {}
 
   async getMyWallet(userId: string): Promise<WalletSummary> {
@@ -133,12 +140,15 @@ export class WalletService {
     const currency =
       this.configService.get<string>('wallet.providers.payos.currency') ||
       'VND';
+    const coinToVndRate =
+      this.configService.get<number>('wallet.coinToVndRate') ?? 1000;
 
     return {
       ...wallet,
       id: user.id,
       _id: user.id,
       userId: user.id,
+      coinToVndRate,
       availableBalance: Math.max(wallet.balance - wallet.frozenBalance, 0),
       pendingBalance,
       totalDeposited: wallet.lifetimeDeposit,
@@ -146,6 +156,224 @@ export class WalletService {
       transactionCount,
       currency,
       lastTransactionAt: latestTransaction?.createdAt,
+    };
+  }
+
+  async getAdminWalletStats(query: WalletAdminStatsQueryDto) {
+    const to = query.to ? new Date(query.to) : new Date();
+    const from = query.from
+      ? new Date(query.from)
+      : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const format = this.getWalletStatsDateFormat(query.groupBy);
+
+    const [walletSummaryAgg, txSummaryAgg, txSeriesAgg, usersWithWallet] =
+      await Promise.all([
+        this.userModel
+          .aggregate<{
+            _id: null;
+            totalBalance: number;
+            totalFrozenBalance: number;
+            totalLifetimeDeposit: number;
+          }>([
+            {
+              $group: {
+                _id: null,
+                totalBalance: { $sum: '$wallet.balance' },
+                totalFrozenBalance: { $sum: '$wallet.frozenBalance' },
+                totalLifetimeDeposit: { $sum: '$wallet.lifetimeDeposit' },
+              },
+            },
+          ])
+          .exec(),
+        this.transactionModel
+          .aggregate<{
+            _id: TransactionType;
+            totalAmount: number;
+            count: number;
+            adminAdjustNet: number;
+          }>([
+            {
+              $match: {
+                status: TransactionStatus.COMPLETED,
+                type: {
+                  $in: [
+                    TransactionType.DEPOSIT,
+                    TransactionType.ADMIN_ADJUST,
+                    TransactionType.REFUND_BUYER,
+                    TransactionType.PURCHASE,
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: '$type',
+                totalAmount: { $sum: '$amount' },
+                count: { $sum: 1 },
+                adminAdjustNet: {
+                  $sum: {
+                    $cond: [
+                      { $eq: ['$type', TransactionType.ADMIN_ADJUST] },
+                      { $subtract: ['$balanceAfter', '$balanceBefore'] },
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ])
+          .exec(),
+        this.transactionModel
+          .aggregate<{
+            _id: string;
+            depositAmount: number;
+            adminAdjustNet: number;
+            refundAmount: number;
+            purchaseAmount: number;
+            transactionCount: number;
+          }>([
+            {
+              $match: {
+                status: TransactionStatus.COMPLETED,
+                createdAt: { $gte: from, $lte: to },
+                type: {
+                  $in: [
+                    TransactionType.DEPOSIT,
+                    TransactionType.ADMIN_ADJUST,
+                    TransactionType.REFUND_BUYER,
+                    TransactionType.PURCHASE,
+                  ],
+                },
+              },
+            },
+            {
+              $project: {
+                period: {
+                  $dateToString: {
+                    format,
+                    date: '$createdAt',
+                  },
+                },
+                depositAmount: {
+                  $cond: [
+                    { $eq: ['$type', TransactionType.DEPOSIT] },
+                    '$amount',
+                    0,
+                  ],
+                },
+                adminAdjustNet: {
+                  $cond: [
+                    { $eq: ['$type', TransactionType.ADMIN_ADJUST] },
+                    { $subtract: ['$balanceAfter', '$balanceBefore'] },
+                    0,
+                  ],
+                },
+                refundAmount: {
+                  $cond: [
+                    { $eq: ['$type', TransactionType.REFUND_BUYER] },
+                    '$amount',
+                    0,
+                  ],
+                },
+                purchaseAmount: {
+                  $cond: [
+                    { $eq: ['$type', TransactionType.PURCHASE] },
+                    '$amount',
+                    0,
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: '$period',
+                depositAmount: { $sum: '$depositAmount' },
+                adminAdjustNet: { $sum: '$adminAdjustNet' },
+                refundAmount: { $sum: '$refundAmount' },
+                purchaseAmount: { $sum: '$purchaseAmount' },
+                transactionCount: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ])
+          .exec(),
+        this.userModel.countDocuments({ wallet: { $exists: true } }),
+      ]);
+
+    const summaryByType = txSummaryAgg.reduce<
+      Record<
+        string,
+        { totalAmount: number; count: number; adminAdjustNet: number }
+      >
+    >((acc, item) => {
+      acc[item._id] = {
+        totalAmount: item.totalAmount ?? 0,
+        count: item.count ?? 0,
+        adminAdjustNet: item.adminAdjustNet ?? 0,
+      };
+      return acc;
+    }, {});
+
+    const walletSummary = walletSummaryAgg[0] ?? {
+      totalBalance: 0,
+      totalFrozenBalance: 0,
+      totalLifetimeDeposit: 0,
+    };
+
+    const depositSummary = summaryByType[TransactionType.DEPOSIT] ?? {
+      totalAmount: 0,
+      count: 0,
+      adminAdjustNet: 0,
+    };
+    const refundSummary = summaryByType[TransactionType.REFUND_BUYER] ?? {
+      totalAmount: 0,
+      count: 0,
+      adminAdjustNet: 0,
+    };
+    const purchaseSummary = summaryByType[TransactionType.PURCHASE] ?? {
+      totalAmount: 0,
+      count: 0,
+      adminAdjustNet: 0,
+    };
+    const adminAdjustSummary = summaryByType[TransactionType.ADMIN_ADJUST] ?? {
+      totalAmount: 0,
+      count: 0,
+      adminAdjustNet: 0,
+    };
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      groupBy: query.groupBy,
+      summary: {
+        usersWithWallet,
+        totalBalance: walletSummary.totalBalance ?? 0,
+        totalFrozenBalance: walletSummary.totalFrozenBalance ?? 0,
+        totalLifetimeDeposit: walletSummary.totalLifetimeDeposit ?? 0,
+        depositTotal: depositSummary.totalAmount,
+        depositCount: depositSummary.count,
+        adminAdjustTotal: adminAdjustSummary.totalAmount,
+        adminAdjustNet: adminAdjustSummary.adminAdjustNet,
+        adminAdjustCount: adminAdjustSummary.count,
+        refundTotal: refundSummary.totalAmount,
+        refundCount: refundSummary.count,
+        purchaseTotal: purchaseSummary.totalAmount,
+        purchaseCount: purchaseSummary.count,
+      },
+      series: txSeriesAgg.map((item) => ({
+        period: item._id,
+        depositAmount: item.depositAmount ?? 0,
+        adminAdjustNet: item.adminAdjustNet ?? 0,
+        refundAmount: item.refundAmount ?? 0,
+        purchaseAmount: item.purchaseAmount ?? 0,
+        netFlow:
+          (item.depositAmount ?? 0) +
+          (item.adminAdjustNet ?? 0) +
+          (item.refundAmount ?? 0) -
+          (item.purchaseAmount ?? 0),
+        transactionCount: item.transactionCount ?? 0,
+      })),
+      generatedAt: new Date().toISOString(),
     };
   }
 
@@ -282,49 +510,122 @@ export class WalletService {
     }, session);
   }
 
-  async adminAdjust(
-    actorUserId: string,
-    dto: AdminAdjustWalletDto,
+  async recordSaleIncome(
+    userId: string,
+    amount: number,
+    options: TransactionOptions = {},
     session?: ClientSession,
   ): Promise<TransactionDocument> {
     return this.executeInTransaction(async (activeSession) => {
       const existing = await this.findExistingTransactionByIdempotencyKey(
-        dto.idempotencyKey,
-        TransactionType.ADMIN_ADJUST,
-        dto.userId,
+        options.idempotencyKey,
+        TransactionType.SALE_INCOME,
+        userId,
         activeSession,
       );
       if (existing) {
         return existing;
       }
 
-      const amount = this.normalizePositiveAmount(dto.amount);
-      const credit =
-        dto.credit ?? (dto.direction ? dto.direction === 'credit' : undefined);
-      if (credit === undefined) {
-        throw new BadRequestException(
-          'Either "credit" or "direction" must be provided',
-        );
-      }
-
-      const delta = credit ? amount : -amount;
       return this.applyWalletMutation(
-        dto.userId,
-        delta,
-        TransactionType.ADMIN_ADJUST,
+        userId,
+        this.normalizePositiveAmount(amount),
+        TransactionType.SALE_INCOME,
         activeSession,
-        {
-          description: dto.reason || 'Admin wallet adjustment',
-          note: dto.note || dto.reason,
-          processedBy: actorUserId,
-          idempotencyKey: dto.idempotencyKey,
-          metadata: {
-            actorUserId,
-            adjustmentType: credit ? 'credit' : 'debit',
-          },
-        },
+        options,
       );
     }, session);
+  }
+
+  async recordPlatformFee(
+    userId: string,
+    amount: number,
+    options: TransactionOptions = {},
+    session?: ClientSession,
+  ): Promise<TransactionDocument> {
+    return this.executeInTransaction(async (activeSession) => {
+      const existing = await this.findExistingTransactionByIdempotencyKey(
+        options.idempotencyKey,
+        TransactionType.PLATFORM_FEE,
+        userId,
+        activeSession,
+      );
+      if (existing) {
+        return existing;
+      }
+
+      return this.applyWalletMutation(
+        userId,
+        -this.normalizePositiveAmount(amount),
+        TransactionType.PLATFORM_FEE,
+        activeSession,
+        options,
+      );
+    }, session);
+  }
+
+  async adminAdjust(
+    actorUserId: string,
+    dto: AdminAdjustWalletDto,
+    session?: ClientSession,
+  ): Promise<TransactionDocument> {
+    const transaction = await this.executeInTransaction(
+      async (activeSession) => {
+        const existing = await this.findExistingTransactionByIdempotencyKey(
+          dto.idempotencyKey,
+          TransactionType.ADMIN_ADJUST,
+          dto.userId,
+          activeSession,
+        );
+        if (existing) {
+          return existing;
+        }
+
+        const amount = this.normalizePositiveAmount(dto.amount);
+        const credit =
+          dto.credit ??
+          (dto.direction ? dto.direction === 'credit' : undefined);
+        if (credit === undefined) {
+          throw new BadRequestException(
+            'Either "credit" or "direction" must be provided',
+          );
+        }
+
+        const delta = credit ? amount : -amount;
+        return this.applyWalletMutation(
+          dto.userId,
+          delta,
+          TransactionType.ADMIN_ADJUST,
+          activeSession,
+          {
+            description: dto.reason || 'Admin wallet adjustment',
+            note: dto.note || dto.reason,
+            processedBy: actorUserId,
+            idempotencyKey: dto.idempotencyKey,
+            metadata: {
+              actorUserId,
+              adjustmentType: credit ? 'credit' : 'debit',
+            },
+          },
+        );
+      },
+      session,
+    );
+
+    await this.safeNotifyWalletUser(
+      dto.userId,
+      NotificationType.WALLET_ADMIN_ADJUSTED,
+      'Your wallet was adjusted by admin',
+      dto.reason || 'Admin wallet adjustment has been applied.',
+      {
+        transactionId: transaction.id,
+        actorUserId,
+        amount: transaction.amount,
+        status: transaction.status,
+      },
+    );
+
+    return transaction;
   }
 
   async getDepositRequest(
@@ -339,7 +640,11 @@ export class WalletService {
     transactionId: string,
     reason?: string,
   ): Promise<TransactionDocument> {
-    return this.depositService.cancelDepositRequest(userId, transactionId, reason);
+    return this.depositService.cancelDepositRequest(
+      userId,
+      transactionId,
+      reason,
+    );
   }
 
   async createDepositRequest(
@@ -379,7 +684,11 @@ export class WalletService {
     payload: Record<string, unknown>,
     signature?: string,
   ): Promise<TransactionDocument> {
-    return this.depositService.handleProviderCallback(provider, payload, signature);
+    return this.depositService.handleProviderCallback(
+      provider,
+      payload,
+      signature,
+    );
   }
 
   async handlePayosWebhook(
@@ -437,6 +746,22 @@ export class WalletService {
     );
   }
 
+  async notifyWalletEvent(input: {
+    userId: string;
+    type: NotificationType;
+    title: string;
+    message: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.safeNotifyWalletUser(
+      input.userId,
+      input.type,
+      input.title,
+      input.message,
+      input.metadata,
+    );
+  }
+
   private buildTransactionFilter(
     userId: string,
     query: WalletTransactionQueryDto,
@@ -466,6 +791,18 @@ export class WalletService {
     }
 
     return filter;
+  }
+
+  private getWalletStatsDateFormat(groupBy: WalletStatsGroupBy): string {
+    if (groupBy === WalletStatsGroupBy.MONTH) {
+      return '%Y-%m';
+    }
+
+    if (groupBy === WalletStatsGroupBy.WEEK) {
+      return '%Y-W%U';
+    }
+
+    return '%Y-%m-%d';
   }
 
   private toWalletTransactionPayload(
@@ -503,6 +840,28 @@ export class WalletService {
     return debitTypes.has(transaction.type) ? 'debit' : 'credit';
   }
 
+  private async safeNotifyWalletUser(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.notificationsService || !Types.ObjectId.isValid(userId)) {
+      return;
+    }
+
+    await this.notificationsService
+      .createWalletNotification({
+        userId,
+        type,
+        title,
+        message,
+        metadata,
+      })
+      .catch(() => undefined);
+  }
+
   private async applyWalletMutation(
     userId: string,
     delta: number,
@@ -525,13 +884,16 @@ export class WalletService {
       totalSpent: [
         TransactionType.PURCHASE,
         TransactionType.SUBSCRIPTION,
+        TransactionType.PLATFORM_FEE,
       ].includes(type)
         ? wallet.totalSpent + Math.abs(delta)
         : wallet.totalSpent,
       totalEarned:
-        [TransactionType.POST_REWARD, TransactionType.REFUND_BUYER].includes(
-          type,
-        ) && delta > 0
+        [
+          TransactionType.POST_REWARD,
+          TransactionType.REFUND_BUYER,
+          TransactionType.SALE_INCOME,
+        ].includes(type) && delta > 0
           ? wallet.totalEarned + Math.abs(delta)
           : wallet.totalEarned,
       lifetimeDeposit:

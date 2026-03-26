@@ -19,14 +19,6 @@ interface ApiSuccess<T> {
   data: T;
 }
 
-interface AuthPayload {
-  user: {
-    id: string;
-    email: string;
-  };
-  accessToken: string;
-}
-
 const buildPayosReturnSignature = (
   payload: Record<string, unknown>,
   checksumKey: string,
@@ -48,32 +40,6 @@ describe('Payment return & health readiness (e2e)', () => {
   const apiPrefix = 'api/v1';
   const checksumKey = 'e2e-payos-checksum-key';
   const server = () => app.getHttpServer() as Parameters<typeof request>[0];
-
-  const registerAndLogin = async (email: string, password: string) => {
-    await request(server())
-      .post(`/${apiPrefix}/auth/register`)
-      .send({
-        fullName: 'Payment E2E User',
-        email,
-        password,
-      })
-      .expect(201);
-
-    await userModel.updateOne(
-      { email },
-      {
-        isEmailVerified: true,
-        emailVerificationCodeHash: null,
-      },
-    );
-
-    const loginRes = await request(server())
-      .post(`/${apiPrefix}/auth/login`)
-      .send({ email, password })
-      .expect(201);
-
-    return (loginRes.body as ApiSuccess<AuthPayload>).data;
-  };
 
   beforeAll(async () => {
     mongoServer = await MongoMemoryServer.create();
@@ -128,21 +94,28 @@ describe('Payment return & health readiness (e2e)', () => {
     await request(server()).get(`/${apiPrefix}/health/ready`).expect(503);
   });
 
-  it('requires auth for payos return-sync and return-status endpoints', async () => {
-    await request(server())
+  it('keeps payos return-sync and return-status endpoints public', async () => {
+    const syncRes = await request(server())
       .post(`/${apiPrefix}/payment/payos/return-sync`)
       .send({ orderCode: '1773857686372' })
-      .expect(401);
+      .expect(200);
+    const syncBody = syncRes.body as ApiSuccess<{
+      code: string;
+      message: string;
+    }>;
+    expect(syncBody.success).toBe(true);
+    expect(syncBody.data.code).toBe('97');
 
-    await request(server())
+    const statusRes = await request(server())
       .get(`/${apiPrefix}/payment/payos/return-status?orderCode=1773857686372`)
-      .expect(401);
+      .expect(200);
+    const statusBody = statusRes.body as ApiSuccess<{ status: string }>;
+    expect(statusBody.success).toBe(true);
+    expect(statusBody.data.status).toBe('unknown');
   });
 
   it('syncs cancelled payos return and reflects status in return-status endpoint', async () => {
-    const auth = await registerAndLogin('payment-e2e@example.com', 'password123');
-    const userId = auth.user.id;
-    const accessToken = auth.accessToken;
+    const userId = new Types.ObjectId().toString();
 
     const orderCode = '1773857686372';
     const paymentLinkId = 'f60d5607d7d04b29842ea25e16b6a0b5';
@@ -173,7 +146,6 @@ describe('Payment return & health readiness (e2e)', () => {
 
     const syncRes = await request(server())
       .post(`/${apiPrefix}/payment/payos/return-sync`)
-      .set('Authorization', `Bearer ${accessToken}`)
       .set('x-payment-signature', signature)
       .send(payload)
       .expect(200);
@@ -192,7 +164,6 @@ describe('Payment return & health readiness (e2e)', () => {
       .get(
         `/${apiPrefix}/payment/payos/return-status?orderCode=${orderCode}&id=${paymentLinkId}&status=CANCELLED&cancel=true`,
       )
-      .set('Authorization', `Bearer ${accessToken}`)
       .expect(200);
 
     const statusBody = statusRes.body as ApiSuccess<{

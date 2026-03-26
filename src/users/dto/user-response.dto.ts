@@ -43,17 +43,48 @@ export class UserPostQuotaResponseDto {
   exhausted: boolean;
 }
 
+export class UserTwoFactorResponseDto {
+  enabled: boolean;
+  enabledAt?: Date;
+  lastVerifiedAt?: Date;
+}
+
+export class UserGamificationResponseDto {
+  xp: number;
+  level: number;
+  xpToNextLevel: number;
+  postsPublished: number;
+  salesCount: number;
+}
+
 export class UserResponseDto {
   id: string;
   fullName: string;
+  username: string;
   email: string;
   role: Role;
   isEmailVerified: boolean;
   isActive: boolean;
   avatarUrl?: string;
+  followersCount: number;
+  followingCount: number;
   wallet: WalletResponseDto;
   subscription: UserSubscriptionResponseDto;
   postQuota: UserPostQuotaResponseDto;
+  twoFactor: UserTwoFactorResponseDto;
+  gamification: UserGamificationResponseDto;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export class PublicUserProfileResponseDto {
+  id: string;
+  fullName: string;
+  username: string;
+  avatarUrl?: string;
+  followersCount: number;
+  followingCount: number;
+  gamification: UserGamificationResponseDto;
   createdAt: Date;
   updatedAt: Date;
 }

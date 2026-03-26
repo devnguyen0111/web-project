@@ -82,6 +82,10 @@ export class WalletController {
     @Param('id', ParseObjectIdPipe) id: string,
     @Body() payload: CancelDepositDto,
   ) {
-    return this.depositService.cancelDepositRequest(userId, id, payload?.reason);
+    return this.depositService.cancelDepositRequest(
+      userId,
+      id,
+      payload?.reason,
+    );
   }
 }

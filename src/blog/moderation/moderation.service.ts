@@ -21,4 +21,8 @@ export class ModerationService {
   reject(postId: string, reviewerId: string, reason: string) {
     return this.postsService.reject(postId, reviewerId, reason);
   }
+
+  stats() {
+    return this.postsService.getModerationStats();
+  }
 }

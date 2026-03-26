@@ -57,7 +57,10 @@ describe('subscription.util', () => {
       secondPurchaseAt,
     );
 
-    const expectedExpiry = addMonthsSafely(existing.expiresAt ?? firstPurchaseAt, 1);
+    const expectedExpiry = addMonthsSafely(
+      existing.expiresAt ?? firstPurchaseAt,
+      1,
+    );
     expect(renewed.planCode).toBe(SubscriptionPlanCode.PRO);
     expect(renewed.expiresAt?.toISOString()).toBe(expectedExpiry.toISOString());
   });

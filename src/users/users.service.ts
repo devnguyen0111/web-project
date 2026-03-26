@@ -13,6 +13,8 @@ import { MinioService } from '../minio/minio.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import {
+  PublicUserProfileResponseDto,
+  UserGamificationResponseDto,
   UserPostQuotaResponseDto,
   UserResponseDto,
   UserSubscriptionResponseDto,
@@ -36,7 +38,7 @@ interface CreateUserInput {
 }
 
 const AUTH_SENSITIVE_FIELDS =
-  '+password +refreshToken +emailVerificationCodeHash +emailVerificationCodeExpiresAt +passwordResetCodeHash +passwordResetCodeExpiresAt';
+  '+password +refreshToken +emailVerificationCodeHash +emailVerificationCodeExpiresAt +passwordResetCodeHash +passwordResetCodeExpiresAt +twoFactor.secretEncrypted +twoFactor.backupCodeHashes';
 
 @Injectable()
 export class UsersService {
@@ -47,11 +49,13 @@ export class UsersService {
 
   async create(input: CreateUserInput): Promise<UserDocument> {
     const hashedPassword = await bcrypt.hash(input.password, 10);
+    const username = await this.generateUniqueUsername(input.fullName);
 
     const createdUser = await this.userModel.create({
       ...input,
       password: hashedPassword,
       email: input.email.toLowerCase(),
+      username,
       wallet: createDefaultWallet(),
       subscription: createDefaultSubscription(),
     });
@@ -71,6 +75,20 @@ export class UsersService {
 
   async findById(id: string): Promise<UserDocument | null> {
     return this.userModel.findById(id);
+  }
+
+  async findByUsername(username: string): Promise<UserDocument | null> {
+    const normalized = username.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    return this.userModel
+      .findOne({
+        username: normalized,
+        isActive: { $ne: false },
+      })
+      .exec();
   }
 
   async findByIdWithSensitive(id: string): Promise<UserDocument | null> {
@@ -202,6 +220,27 @@ export class UsersService {
     const hashedPassword = await bcrypt.hash(password, 10);
     await this.userModel.findByIdAndUpdate(userId, {
       password: hashedPassword,
+    });
+  }
+
+  async updateTwoFactorState(
+    userId: string,
+    input: {
+      enabled: boolean;
+      secretEncrypted: string | null;
+      backupCodeHashes: string[];
+      enabledAt: Date | null;
+      lastVerifiedAt: Date | null;
+    },
+  ): Promise<void> {
+    await this.userModel.findByIdAndUpdate(userId, {
+      twoFactor: {
+        enabled: input.enabled,
+        secretEncrypted: input.secretEncrypted,
+        backupCodeHashes: input.backupCodeHashes,
+        enabledAt: input.enabledAt,
+        lastVerifiedAt: input.lastVerifiedAt,
+      },
     });
   }
 
@@ -370,6 +409,17 @@ export class UsersService {
     return updatedUser;
   }
 
+  async getPublicProfileByUsername(
+    username: string,
+  ): Promise<PublicUserProfileResponseDto> {
+    const user = await this.findByUsername(username);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.toPublicResponse(user);
+  }
+
   toResponse(user: UserDocument): UserResponseDto {
     const wallet = this.normalizeWallet(user.wallet);
     const normalizedSubscription = normalizeSubscription(user.subscription);
@@ -402,18 +452,42 @@ export class UsersService {
       remainingPosts: postQuota.remainingPosts,
       exhausted: postQuota.exhausted,
     };
+    const gamification = this.normalizeGamification(user.gamification);
 
     return {
       id: user.id,
       fullName: user.fullName,
+      username: user.username || `user-${user.id.slice(-6).toLowerCase()}`,
       email: user.email,
       role: user.role,
       isEmailVerified: user.isEmailVerified,
       isActive: user.isActive !== false,
       avatarUrl: user.avatarUrl,
+      followersCount: Math.max(0, user.followersCount ?? 0),
+      followingCount: Math.max(0, user.followingCount ?? 0),
       wallet,
       subscription,
       postQuota: quota,
+      twoFactor: {
+        enabled: user.twoFactor?.enabled === true,
+        enabledAt: user.twoFactor?.enabledAt,
+        lastVerifiedAt: user.twoFactor?.lastVerifiedAt,
+      },
+      gamification,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  toPublicResponse(user: UserDocument): PublicUserProfileResponseDto {
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      username: user.username || `user-${user.id.slice(-6).toLowerCase()}`,
+      avatarUrl: user.avatarUrl,
+      followersCount: Math.max(0, user.followersCount ?? 0),
+      followingCount: Math.max(0, user.followingCount ?? 0),
+      gamification: this.normalizeGamification(user.gamification),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -431,5 +505,56 @@ export class UsersService {
       totalSpent: wallet?.totalSpent ?? defaults.totalSpent,
       lifetimeDeposit: wallet?.lifetimeDeposit ?? defaults.lifetimeDeposit,
     };
+  }
+
+  private normalizeGamification(
+    gamification: Partial<UserGamificationResponseDto> | undefined,
+  ): UserGamificationResponseDto {
+    const xp = Math.max(0, gamification?.xp ?? 0);
+    const level = Math.max(1, gamification?.level ?? 1);
+    const xpToNextLevel = Math.max(
+      1,
+      gamification?.xpToNextLevel ?? level * 100,
+    );
+
+    return {
+      xp,
+      level,
+      xpToNextLevel,
+      postsPublished: Math.max(0, gamification?.postsPublished ?? 0),
+      salesCount: Math.max(0, gamification?.salesCount ?? 0),
+    };
+  }
+
+  private async generateUniqueUsername(fullName: string): Promise<string> {
+    const base = this.normalizeUsernameBase(fullName);
+    let candidate = base;
+    let counter = 1;
+
+    while (true) {
+      const exists = await this.userModel.exists({ username: candidate });
+      if (!exists) {
+        return candidate;
+      }
+
+      counter += 1;
+      const suffix = `-${counter}`;
+      const trimmedBase = base.slice(0, Math.max(3, 60 - suffix.length));
+      candidate = `${trimmedBase}${suffix}`;
+    }
+  }
+
+  private normalizeUsernameBase(fullName: string): string {
+    const normalized = fullName
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+    const fallback = `user-${Date.now().toString().slice(-6)}`;
+    const base = (normalized || fallback).slice(0, 60);
+    const compact = base.replace(/^-+|-+$/g, '');
+    return compact.length >= 3 ? compact : `${compact}user`.slice(0, 60);
   }
 }

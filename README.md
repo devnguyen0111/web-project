@@ -10,8 +10,8 @@ NestJS backend for auth, users, blog, wallet, subscriptions, notifications, stor
 - Wallet: balance, transactions, deposit requests, PayOS webhook/return callbacks, admin adjustments.
 - Subscriptions: canonical `free`, `pro`, `vip` plans; monthly, quarterly, yearly billing; wallet-coin purchase; auto-renew with grace period.
 - Notifications: minimal in-app feed for subscription events.
-- Store MVP: products CRUD/listing, direct order creation (`buy-now`), and order lookup.
-- Store operations MVP: store order list and dashboard summary for staff/admin.
+- Store: products CRUD/listing, direct order creation (`buy-now`), quote lifecycle (accept/reject), delivery uploads, and secure download links.
+- Store operations: store order list/dashboard plus product moderation queue and approve/reject flows for staff/admin.
 - Reviews MVP: product/store review create/list and staff/admin reply.
 - Cart MVP: get/add/update/remove/clear/checkout with checkout revalidation.
 - Health + Ops alerting: liveness/readiness endpoints with alert hooks for readiness, webhook, and renewal outcomes.
@@ -19,12 +19,9 @@ NestJS backend for auth, users, blog, wallet, subscriptions, notifications, stor
 
 ## Planned (Not Implemented Yet)
 
-- Tickets module and admin ticket flows.
-- Wiki/knowledge-base module.
-- Gamification/social modules.
-- Store quote/delivery and advanced fulfillment flows.
-- Admin dashboard/audit-log endpoints and `GET /admin/wallet/stats`.
-- WebSocket/Bull realtime and queue-based flows.
+- Referral and advanced subscription perks.
+- Bull/Redis queue-based mail and async workflows.
+- Multi-instance realtime scaling hardening.
 
 ## Current Subscription Behavior
 
@@ -62,6 +59,11 @@ cp .env.example .env
 3. Update `.env` for your machine.
 
 - `NODE_ENV`, `PORT`, `API_PREFIX`
+- `APP_CORS_ORIGINS`, `APP_CORS_CREDENTIALS`
+- `APP_SWAGGER_ENABLED`, `APP_SWAGGER_PATH`
+- `APP_SECURITY_HEADERS_ENABLED`
+- `APP_AUTH_PAYMENT_RATE_LIMIT_ENABLED`, `APP_AUTH_PAYMENT_RATE_LIMIT_WINDOW_MS`, `APP_AUTH_PAYMENT_RATE_LIMIT_MAX`
+- `WS_NOTIFICATIONS_NAMESPACE`
 - `MONGODB_URI`
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`
 - `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`
@@ -109,6 +111,7 @@ Default URLs:
 - `npm run test:debug`
 - `npm run test:e2e`
 - `npm run migrate:role-user-to-author`
+- `npm run migrate:usernames`
 - `npm run migrate:post-content-to-blocks`
 - `npm run migrate:wallet-transaction-units`
 - `npm run migrate:subscription-tier-v2`
@@ -187,6 +190,9 @@ Default URLs:
 - `POST /orders`
 - `GET /orders/me`
 - `GET /orders/:id`
+- `POST /orders/:id/quote/accept`
+- `POST /orders/:id/quote/reject`
+- `GET /orders/:id/download`
 - `GET /cart`
 - `POST /cart/items`
 - `PATCH /cart/items/:itemId`
@@ -222,16 +228,39 @@ Default URLs:
 - `POST /products`
 - `PATCH /products/:id`
 - `DELETE /products/:id`
+- `POST /products/:id/file`
+- `POST /products/:id/submit-review`
 - `PATCH /reviews/:id/reply`
 - `GET /store/orders`
 - `GET /store/dashboard`
+- `GET /store/products/pending-review`
+- `POST /store/products/:id/approve`
+- `POST /store/products/:id/reject`
+- `POST /store/orders/:id/quote`
+- `POST /store/orders/:id/deliver`
 - `POST /admin/wallet/adjust`
 
 Auth uses bearer JWT. Public routes do not require a token.
 
+## WebSocket Notifications
+
+- Namespace: `WS_NOTIFICATIONS_NAMESPACE` (default `/notifications`).
+- Auth: pass access token in `handshake.auth.token` (accepts raw token or `Bearer <token>`).
+- CORS: WebSocket handshake reuses backend allowlist from `APP_CORS_ORIGINS`.
+- Push-only events emitted by server:
+  - `notifications:ready` `{ userId, unreadCount, connectedAt }`
+  - `notifications:new` `{ notification }`
+  - `notifications:unread-count` `{ unreadCount }`
+  - `notifications:read` `{ id, readAt }`
+  - `notifications:read-all` `{ updated, readAt }`
+  - `notifications:error` `{ message }`
+
 ## Env Notes
 
 - `S3_ENDPOINT` can be a host name or a full `http(s)://...` URL. The app parses both.
+- `APP_CORS_ORIGINS` is a comma-separated allowlist; requests from origins outside this list are rejected.
+- `APP_SWAGGER_ENABLED` defaults to `false` in production and `true` otherwise.
+- `APP_AUTH_PAYMENT_RATE_LIMIT_*` controls in-app rate limiting for `/auth/*` and `/payment/*` routes.
 - If SMTP is not fully configured, mail sending falls back to log preview mode.
 - If `S3_INIT_BUCKETS=true` and storage credentials are present, the app tries to create the configured buckets on startup.
 - `SUBSCRIPTION_GRACE_DAYS` defaults to `3` when omitted.

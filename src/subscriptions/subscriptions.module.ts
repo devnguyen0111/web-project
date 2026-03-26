@@ -5,7 +5,10 @@ import { MongoTransactionService } from '../common/services/mongo-transaction.se
 import { NotificationsModule } from '../notifications/notifications.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { WalletModule } from '../wallet/wallet.module';
-import { Transaction, TransactionSchema } from '../wallet/schemas/transaction.schema';
+import {
+  Transaction,
+  TransactionSchema,
+} from '../wallet/schemas/transaction.schema';
 import { SubscriptionsController } from './subscriptions.controller';
 import { SubscriptionsService } from './subscriptions.service';
 
@@ -24,5 +27,3 @@ import { SubscriptionsService } from './subscriptions.service';
   exports: [SubscriptionsService],
 })
 export class SubscriptionsModule {}
-
-

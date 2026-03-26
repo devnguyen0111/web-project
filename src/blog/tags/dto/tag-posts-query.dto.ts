@@ -15,4 +15,3 @@ export class TagPostsQueryDto {
   @Max(100)
   limit?: number;
 }
-

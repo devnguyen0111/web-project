@@ -16,6 +16,7 @@ describe('PostsService', () => {
   let postModel: {
     create: jest.Mock;
     findOne: jest.Mock;
+    countDocuments: jest.Mock;
   };
   let pollVoteModel: Record<string, jest.Mock>;
   let categoryModel: {
@@ -44,6 +45,7 @@ describe('PostsService', () => {
       findOne: jest.fn().mockReturnValue({
         exec: jest.fn().mockResolvedValue(null),
       }),
+      countDocuments: jest.fn(),
     };
     pollVoteModel = {};
     categoryModel = {
@@ -114,5 +116,31 @@ describe('PostsService', () => {
     expect(subscriptionsService.consumePostQuota).toHaveBeenCalledTimes(1);
     expect(postModel.create).not.toHaveBeenCalled();
     expect(tagModel.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns moderation stats summary', async () => {
+    postModel.countDocuments
+      .mockResolvedValueOnce(5) // pending
+      .mockResolvedValueOnce(9) // published
+      .mockResolvedValueOnce(2) // rejected
+      .mockResolvedValueOnce(4) // draft
+      .mockResolvedValueOnce(7) // reviewedLast7Days
+      .mockResolvedValueOnce(6) // approvedLast7Days
+      .mockResolvedValueOnce(1); // rejectedLast7Days
+
+    const result = await service.getModerationStats();
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        pending: 5,
+        published: 9,
+        rejected: 2,
+        draft: 4,
+        reviewedLast7Days: 7,
+        approvedLast7Days: 6,
+        rejectedLast7Days: 1,
+      }),
+    );
+    expect(typeof result.generatedAt).toBe('string');
   });
 });

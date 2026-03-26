@@ -111,7 +111,9 @@ describe('SubscriptionsService', () => {
 
   it('purchases paid subscription and charges wallet once', async () => {
     const startedSession = {
-      withTransaction: jest.fn(async (callback: () => Promise<void>) => callback()),
+      withTransaction: jest.fn(async (callback: () => Promise<void>) =>
+        callback(),
+      ),
       endSession: jest.fn().mockResolvedValue(undefined),
     };
     connection.startSession.mockResolvedValue(startedSession);
@@ -146,7 +148,9 @@ describe('SubscriptionsService', () => {
 
   it('blocks quota consumption when remaining posts are zero', async () => {
     const startedSession = {
-      withTransaction: jest.fn(async (callback: () => Promise<void>) => callback()),
+      withTransaction: jest.fn(async (callback: () => Promise<void>) =>
+        callback(),
+      ),
       endSession: jest.fn().mockResolvedValue(undefined),
     };
     connection.startSession.mockResolvedValue(startedSession);

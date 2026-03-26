@@ -90,7 +90,7 @@ export const normalizeSubscription = (
     billingCycle,
     autoRenew:
       normalizedInput?.autoRenew ??
-      (isPaidPlan ? true : fallback.autoRenew ?? false),
+      (isPaidPlan ? true : (fallback.autoRenew ?? false)),
     cancelAtPeriodEnd: normalizedInput?.cancelAtPeriodEnd ?? false,
     status: normalizedInput?.status ?? SubscriptionStatus.ACTIVE,
     startedAt: normalizedInput?.startedAt
@@ -229,7 +229,9 @@ export const purchaseSubscriptionPlan = (
   const newExpiresAt = addMonthsSafely(extendedFrom, normalizedMonths);
   const paidPlan = canonicalPlanCode !== SubscriptionPlanCode.FREE;
   const nextStartedAt =
-    normalized.planCode === canonicalPlanCode ? normalized.startedAt : new Date(now);
+    normalized.planCode === canonicalPlanCode
+      ? normalized.startedAt
+      : new Date(now);
 
   return {
     ...normalized,
@@ -240,7 +242,7 @@ export const purchaseSubscriptionPlan = (
     billingCycle,
     basePostLimit: SUBSCRIPTION_BASE_POST_LIMIT,
     status: SubscriptionStatus.ACTIVE,
-    autoRenew: paidPlan ? normalized.autoRenew ?? true : false,
+    autoRenew: paidPlan ? (normalized.autoRenew ?? true) : false,
     cancelAtPeriodEnd: false,
     startedAt: nextStartedAt,
     expiresAt: newExpiresAt,
@@ -299,7 +301,10 @@ export const shouldSendReminder = (
 ): boolean => {
   const normalized = normalizeSubscription(subscription, now);
 
-  if (normalized.planCode === SubscriptionPlanCode.FREE || !normalized.expiresAt) {
+  if (
+    normalized.planCode === SubscriptionPlanCode.FREE ||
+    !normalized.expiresAt
+  ) {
     return false;
   }
 

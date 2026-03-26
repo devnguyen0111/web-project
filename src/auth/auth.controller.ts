@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -16,6 +16,8 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { VerifyTwoFactorDto } from './dto/verify-two-factor.dto';
+import { DisableTwoFactorDto } from './dto/disable-two-factor.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -36,9 +38,13 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Login and receive access/refresh tokens' })
   @ApiBody({ type: LoginDto })
-  @ApiResponse({ status: 201, description: 'Login successful' })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful or 2FA challenge',
+  })
   async login(@Body() payload: LoginDto) {
     return this.authService.login(payload);
   }
@@ -100,5 +106,34 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'Logout successful' })
   async logout(@CurrentUser('userId') userId: string) {
     return this.authService.logout(userId);
+  }
+
+  @ApiBearerAuth()
+  @Post('2fa/enable')
+  @ApiOperation({ summary: 'Create 2FA setup challenge (TOTP)' })
+  @ApiResponse({ status: 201, description: '2FA setup challenge created' })
+  async enableTwoFactor(@CurrentUser('userId') userId: string) {
+    return this.authService.enableTwoFactor(userId);
+  }
+
+  @Public()
+  @Post('2fa/verify')
+  @ApiOperation({ summary: 'Verify 2FA setup token or login challenge token' })
+  @ApiBody({ type: VerifyTwoFactorDto })
+  @ApiResponse({ status: 201, description: '2FA verification successful' })
+  async verifyTwoFactor(@Body() payload: VerifyTwoFactorDto) {
+    return this.authService.verifyTwoFactor(payload);
+  }
+
+  @ApiBearerAuth()
+  @Post('2fa/disable')
+  @ApiOperation({ summary: 'Disable 2FA using password + TOTP/backup code' })
+  @ApiBody({ type: DisableTwoFactorDto })
+  @ApiResponse({ status: 201, description: '2FA disabled successfully' })
+  async disableTwoFactor(
+    @CurrentUser('userId') userId: string,
+    @Body() payload: DisableTwoFactorDto,
+  ) {
+    return this.authService.disableTwoFactor(userId, payload);
   }
 }

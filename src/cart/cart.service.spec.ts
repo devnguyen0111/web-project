@@ -28,6 +28,8 @@ describe('CartService', () => {
   };
   let ordersService: {
     createOrderFromItems: jest.Mock;
+    findExistingOrderByIdempotency: jest.Mock;
+    dispatchDeliveryEmailForOrder: jest.Mock;
   };
 
   beforeEach(() => {
@@ -48,16 +50,17 @@ describe('CartService', () => {
     };
     ordersService = {
       createOrderFromItems: jest.fn(),
+      findExistingOrderByIdempotency: jest.fn(),
+      dispatchDeliveryEmailForOrder: jest.fn().mockResolvedValue(undefined),
     };
 
-    const mongoTransactionService = new MongoTransactionService(
-      {
-        get: jest.fn(),
-      } as unknown as ConfigService,
-    );
+    const mongoTransactionService = new MongoTransactionService({
+      get: jest.fn(),
+    } as unknown as ConfigService);
 
     service = new CartService(
       cartModel as never,
+      undefined,
       connection as never,
       productsService as unknown as ProductsService,
       ordersService as unknown as OrdersService,
@@ -136,6 +139,7 @@ describe('CartService', () => {
     };
     cartModel.findOne.mockReturnValue(buildQuery(cartDoc));
     ordersService.createOrderFromItems.mockResolvedValue({ id: 'order-1' });
+    ordersService.findExistingOrderByIdempotency.mockResolvedValue(null);
 
     const result = await service.checkout(userId, { idempotencyKey: 'cart-1' });
 
@@ -155,6 +159,9 @@ describe('CartService', () => {
     expect(result.cart.items).toHaveLength(0);
     expect(result.cart.total).toBe(0);
     expect(cartDoc.save).toHaveBeenCalled();
+    expect(ordersService.dispatchDeliveryEmailForOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'order-1' }),
+    );
   });
 
   it('throws when checkout is requested on empty cart', async () => {
@@ -179,6 +186,37 @@ describe('CartService', () => {
     await expect(service.checkout(userId, {})).rejects.toBeInstanceOf(
       BadRequestException,
     );
+    expect(ordersService.findExistingOrderByIdempotency).not.toHaveBeenCalled();
     expect(ordersService.createOrderFromItems).not.toHaveBeenCalled();
+  });
+
+  it('returns existing order on checkout idempotent replay', async () => {
+    const session = {
+      withTransaction: jest.fn(),
+      endSession: jest.fn().mockResolvedValue(undefined),
+    };
+    connection.startSession.mockResolvedValue(session);
+
+    const userId = new Types.ObjectId().toString();
+    const order = { id: 'order-replayed' };
+    ordersService.findExistingOrderByIdempotency.mockResolvedValue(order);
+    cartModel.findOne.mockReturnValue(buildQuery(null));
+
+    const result = await service.checkout(userId, {
+      idempotencyKey: 'cart-replay-1',
+    });
+
+    expect(ordersService.findExistingOrderByIdempotency).toHaveBeenCalledWith(
+      userId,
+      'cart-replay-1',
+      expect.any(String),
+      session,
+    );
+    expect(ordersService.createOrderFromItems).not.toHaveBeenCalled();
+    expect(result.order).toBe(order);
+    expect(result.cart.items).toEqual([]);
+    expect(ordersService.dispatchDeliveryEmailForOrder).toHaveBeenCalledWith(
+      order,
+    );
   });
 });

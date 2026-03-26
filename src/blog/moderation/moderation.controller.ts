@@ -18,11 +18,11 @@ import { PostsQueryDto } from '../posts/dto/posts-query.dto';
 @ApiTags('moderation')
 @ApiBearerAuth()
 @Roles(Role.STAFF, Role.ADMIN)
-@Controller('moderation/posts')
+@Controller('moderation')
 export class ModerationController {
   constructor(private readonly moderationService: ModerationService) {}
 
-  @Get()
+  @Get('posts')
   @ApiOperation({ summary: 'List pending posts for moderation' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -30,14 +30,14 @@ export class ModerationController {
     return this.moderationService.listPending(query);
   }
 
-  @Get(':id')
+  @Get('posts/:id')
   @ApiOperation({ summary: 'Get pending post detail for moderation' })
   @ApiParam({ name: 'id' })
   findPendingById(@Param('id', ParseObjectIdPipe) id: string) {
     return this.moderationService.findPendingById(id);
   }
 
-  @Patch(':id/approve')
+  @Patch('posts/:id/approve')
   @ApiOperation({ summary: 'Approve pending post' })
   @ApiParam({ name: 'id' })
   approve(
@@ -47,7 +47,7 @@ export class ModerationController {
     return this.moderationService.approve(id, reviewerId);
   }
 
-  @Patch(':id/reject')
+  @Patch('posts/:id/reject')
   @ApiOperation({ summary: 'Reject pending post' })
   @ApiParam({ name: 'id' })
   @ApiBody({ type: RejectPostDto })
@@ -57,5 +57,11 @@ export class ModerationController {
     @Body() payload: RejectPostDto,
   ) {
     return this.moderationService.reject(id, reviewerId, payload.reason);
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get moderation statistics' })
+  stats() {
+    return this.moderationService.stats();
   }
 }

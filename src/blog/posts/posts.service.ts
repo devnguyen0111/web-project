@@ -1,4 +1,5 @@
 import {
+  Optional,
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -11,6 +12,10 @@ import { Role } from '../../common/constants/roles.constant';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { toSlug } from '../../common/utils/slug.util';
 import { MinioService } from '../../minio/minio.service';
+import {
+  SubscriptionPlanCode,
+  SubscriptionStatus,
+} from '../../subscriptions/subscription.constants';
 import { SubscriptionsService } from '../../subscriptions/subscriptions.service';
 import { User } from '../../users/schemas/user.schema';
 import { Category } from '../categories/schemas/category.schema';
@@ -22,12 +27,17 @@ import {
   Post,
   PostImageSize,
   PostBlockType,
+  PostCalloutTone,
   PostDocument,
+  PostEmbedProvider,
   PostListStyle,
   PostStatus,
 } from './schemas/post.schema';
 import { PollVote } from './schemas/poll-vote.schema';
 import { WalletService } from '../../wallet/wallet.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { NotificationType } from '../../notifications/schemas/notification.schema';
+import { GamificationService } from '../../gamification/gamification.service';
 
 interface AuthUser {
   userId: string;
@@ -37,6 +47,7 @@ interface AuthUser {
 interface FindPublishedBySlugOptions {
   shouldIncrementView?: boolean;
   viewerFingerprint?: string;
+  viewerUserId?: string;
 }
 
 interface PollInput {
@@ -59,6 +70,13 @@ interface PostBlockInput {
   size?: PostImageSize;
   code?: string;
   language?: string;
+  provider?: PostEmbedProvider;
+  embedUrl?: string;
+  tone?: PostCalloutTone;
+  todoItems?: Array<{
+    text?: string;
+    checked?: boolean;
+  }>;
 }
 
 interface NormalizedPostBlock {
@@ -74,16 +92,88 @@ interface NormalizedPostBlock {
   size?: PostImageSize;
   code?: string;
   language?: string;
+  provider?: PostEmbedProvider;
+  embedUrl?: string;
+  tone?: PostCalloutTone;
+  todoItems?: Array<{
+    text: string;
+    checked: boolean;
+  }>;
 }
 
 type PostAuthor = {
   id: string;
   fullName: string;
   avatarUrl?: string;
+  level: number;
 };
 
 type PostWithAuthor = PostDocument & {
   author?: PostAuthor | null;
+};
+
+type TableOfContentsItem = {
+  id: string;
+  text: string;
+  level: 1 | 2 | 3;
+};
+
+type BlogPostCardV2 = {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  coverImageUrl?: string;
+  flags: {
+    isExclusive: boolean;
+    isFeatured: boolean;
+    isPinned: boolean;
+  };
+  author: PostAuthor;
+  metrics: {
+    views: number;
+    likesCount: number;
+    commentsCount: number;
+    readTimeMinutes: number;
+    rewardCoins?: number;
+  };
+  publishedAt?: string;
+};
+
+type BlogPostDetailV2 = {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt?: string;
+  coverImageUrl?: string;
+  flags: {
+    isExclusive: boolean;
+    isFeatured: boolean;
+    isPinned: boolean;
+  };
+  author: PostAuthor;
+  metrics: {
+    views: number;
+    likesCount: number;
+    bookmarksCount: number;
+    commentsCount: number;
+    readTimeMinutes: number;
+    rewardCoins?: number;
+  };
+  access: {
+    locked: boolean;
+    reason?: 'vip_required';
+    upgradeUrl: '/subscription';
+  };
+  blocks: NormalizedPostBlock[];
+  toc: TableOfContentsItem[];
+  poll?: {
+    question: string;
+    options: Array<{ text: string; votes: number }>;
+    totalVotes: number;
+    isPermanent?: boolean;
+    endsAt?: Date;
+  };
 };
 
 @Injectable()
@@ -104,6 +194,10 @@ export class PostsService {
     private readonly walletService: WalletService,
     private readonly configService: ConfigService,
     private readonly minioService: MinioService,
+    @Optional()
+    private readonly notificationsService?: NotificationsService,
+    @Optional()
+    private readonly gamificationService?: GamificationService,
   ) {}
 
   async createDraft(
@@ -130,6 +224,9 @@ export class PostsService {
             blocks: normalizedBlocks,
             searchText,
             content: searchText,
+            isExclusive: payload.isExclusive === true,
+            isFeatured: payload.isFeatured === true,
+            isPinned: payload.isPinned === true,
             categoryId: payload.categoryId
               ? new Types.ObjectId(payload.categoryId)
               : undefined,
@@ -224,6 +321,18 @@ export class PostsService {
     if (payload.poll !== undefined) {
       post.poll = payload.poll ? this.normalizePoll(payload.poll) : undefined;
       await this.pollVoteModel.deleteMany({ postId: post._id });
+    }
+
+    if (payload.isExclusive !== undefined) {
+      post.isExclusive = payload.isExclusive;
+    }
+
+    if (payload.isFeatured !== undefined) {
+      post.isFeatured = payload.isFeatured;
+    }
+
+    if (payload.isPinned !== undefined) {
+      post.isPinned = payload.isPinned;
     }
 
     if (!isModerator && post.status !== PostStatus.DRAFT) {
@@ -359,7 +468,7 @@ export class PostsService {
 
   async listPublished(
     query: PostsQueryDto,
-  ): Promise<PaginatedResponseDto<PostDocument>> {
+  ): Promise<PaginatedResponseDto<BlogPostCardV2>> {
     const filter: Record<string, unknown> = {
       status: PostStatus.PUBLISHED,
     };
@@ -385,18 +494,17 @@ export class PostsService {
     const [data, total] = await Promise.all([
       this.postModel
         .find(filter)
-        .sort({ publishedAt: -1, createdAt: -1 })
+        .sort({ isPinned: -1, isFeatured: -1, publishedAt: -1, createdAt: -1 })
         .skip(skip)
         .limit(query.limit)
         .lean(),
       this.postModel.countDocuments(filter),
     ]);
-    const enrichedPosts = await this.enrichPostsWithAuthor(
-      data as PostDocument[],
-    );
+    const enrichedPosts = await this.enrichPostsWithAuthor(data as PostDocument[]);
+    const cards = enrichedPosts.map((post) => this.toBlogPostCardV2(post));
 
     return new PaginatedResponseDto(
-      enrichedPosts,
+      cards,
       total,
       query.page,
       query.limit,
@@ -451,7 +559,7 @@ export class PostsService {
   async findPublishedBySlug(
     slug: string,
     options: FindPublishedBySlugOptions = {},
-  ): Promise<PostDocument> {
+  ): Promise<BlogPostDetailV2> {
     const post = await this.postModel
       .findOne({ slug, status: PostStatus.PUBLISHED })
       .exec();
@@ -469,7 +577,10 @@ export class PostsService {
       post.views += 1;
     }
 
-    return this.enrichPostWithAuthor(post);
+    const enrichedPost = await this.enrichPostWithAuthor(post);
+    const isViewerVip = await this.isViewerVipActive(options.viewerUserId);
+    const locked = enrichedPost.isExclusive === true && !isViewerVip;
+    return this.toBlogPostDetailV2(enrichedPost, locked);
   }
 
   private shouldCountViewByFingerprint(
@@ -748,7 +859,7 @@ export class PostsService {
   }
 
   async approve(postId: string, reviewerId: string): Promise<PostDocument> {
-    return this.executeInTransaction(async (session) => {
+    const post = await this.executeInTransaction(async (session) => {
       const post = await this.postModel
         .findById(postId)
         .session(session)
@@ -801,6 +912,23 @@ export class PostsService {
       await post.save({ session });
       return this.enrichPostWithAuthor(post);
     });
+
+    await this.safeNotifyPostModeration(
+      post.authorId.toString(),
+      NotificationType.BLOG_POST_APPROVED,
+      'Your post has been approved',
+      post.title,
+      {
+        postId: post.id,
+        slug: post.slug,
+        reviewedBy: reviewerId,
+      },
+    );
+    await this.gamificationService
+      ?.recordPostApproved(post.authorId.toString(), post.id)
+      .catch(() => undefined);
+
+    return post;
   }
 
   async reject(
@@ -823,7 +951,85 @@ export class PostsService {
     post.rejectionReason = reason;
 
     await post.save();
-    return this.enrichPostWithAuthor(post);
+    const enriched = await this.enrichPostWithAuthor(post);
+
+    await this.safeNotifyPostModeration(
+      post.authorId.toString(),
+      NotificationType.BLOG_POST_REJECTED,
+      'Your post was rejected by moderation',
+      post.title,
+      {
+        postId: post.id,
+        slug: post.slug,
+        reviewedBy: reviewerId,
+        reason,
+      },
+    );
+
+    return enriched;
+  }
+
+  async getModerationStats() {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      pending,
+      published,
+      rejected,
+      draft,
+      reviewedLast7Days,
+      approvedLast7Days,
+      rejectedLast7Days,
+    ] = await Promise.all([
+      this.postModel.countDocuments({ status: PostStatus.PENDING }),
+      this.postModel.countDocuments({ status: PostStatus.PUBLISHED }),
+      this.postModel.countDocuments({ status: PostStatus.REJECTED }),
+      this.postModel.countDocuments({ status: PostStatus.DRAFT }),
+      this.postModel.countDocuments({
+        reviewedAt: { $gte: since },
+      }),
+      this.postModel.countDocuments({
+        status: PostStatus.PUBLISHED,
+        reviewedAt: { $gte: since },
+      }),
+      this.postModel.countDocuments({
+        status: PostStatus.REJECTED,
+        reviewedAt: { $gte: since },
+      }),
+    ]);
+
+    return {
+      pending,
+      published,
+      rejected,
+      draft,
+      reviewedLast7Days,
+      approvedLast7Days,
+      rejectedLast7Days,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async safeNotifyPostModeration(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.notificationsService) {
+      return;
+    }
+
+    await this.notificationsService
+      .createBlogNotification({
+        userId,
+        type,
+        title,
+        message,
+        metadata,
+      })
+      .catch(() => undefined);
   }
 
   private async executeInTransaction<T>(
@@ -975,6 +1181,268 @@ export class PostsService {
     post.publishedAt = undefined;
   }
 
+  private toBlogPostCardV2(post: PostDocument): BlogPostCardV2 {
+    const enrichedPost = post as PostWithAuthor;
+    const author = enrichedPost.author ?? {
+      id: post.authorId.toString(),
+      fullName: '[Unknown author]',
+      level: 1,
+    };
+    const rewardCoins = this.getPostRewardCoins();
+
+    return {
+      id: post.id,
+      slug: post.slug,
+      title: post.title,
+      excerpt: this.resolveExcerpt(post.excerpt, post.blocks as NormalizedPostBlock[]),
+      coverImageUrl: post.coverImageUrl,
+      flags: {
+        isExclusive: post.isExclusive === true,
+        isFeatured: post.isFeatured === true,
+        isPinned: post.isPinned === true,
+      },
+      author,
+      metrics: {
+        views: post.views,
+        likesCount: post.likesCount,
+        commentsCount: post.commentsCount,
+        readTimeMinutes: this.calculateReadTimeMinutes(
+          post.blocks as NormalizedPostBlock[],
+          post.excerpt,
+        ),
+        rewardCoins: rewardCoins > 0 ? rewardCoins : undefined,
+      },
+      publishedAt: this.toIsoString(post.publishedAt),
+    };
+  }
+
+  private toBlogPostDetailV2(
+    post: PostDocument,
+    locked: boolean,
+  ): BlogPostDetailV2 {
+    const enrichedPost = post as PostWithAuthor;
+    const author = enrichedPost.author ?? {
+      id: post.authorId.toString(),
+      fullName: '[Unknown author]',
+      level: 1,
+    };
+    const normalizedBlocks = post.blocks as NormalizedPostBlock[];
+    const blocks = locked ? [] : normalizedBlocks;
+    const rewardCoins = this.getPostRewardCoins();
+
+    return {
+      id: post.id,
+      slug: post.slug,
+      title: post.title,
+      excerpt: post.excerpt,
+      coverImageUrl: post.coverImageUrl,
+      flags: {
+        isExclusive: post.isExclusive === true,
+        isFeatured: post.isFeatured === true,
+        isPinned: post.isPinned === true,
+      },
+      author,
+      metrics: {
+        views: post.views,
+        likesCount: post.likesCount,
+        bookmarksCount: post.bookmarksCount,
+        commentsCount: post.commentsCount,
+        readTimeMinutes: this.calculateReadTimeMinutes(normalizedBlocks, post.excerpt),
+        rewardCoins: rewardCoins > 0 ? rewardCoins : undefined,
+      },
+      access: {
+        locked,
+        reason: locked ? 'vip_required' : undefined,
+        upgradeUrl: '/subscription',
+      },
+      blocks,
+      toc: locked ? [] : this.buildTableOfContents(normalizedBlocks),
+      poll: post.poll
+        ? {
+            question: post.poll.question,
+            options: post.poll.options.map((option) => ({
+              text: option.text,
+              votes: option.votes,
+            })),
+            totalVotes: post.poll.totalVotes,
+            isPermanent: post.poll.isPermanent,
+            endsAt: post.poll.endsAt,
+          }
+        : undefined,
+    };
+  }
+
+  private buildTableOfContents(blocks: NormalizedPostBlock[]): TableOfContentsItem[] {
+    const usedIds = new Set<string>();
+    const toc: TableOfContentsItem[] = [];
+
+    blocks.forEach((block, index) => {
+      if (
+        block.type !== PostBlockType.HEADING ||
+        !block.text ||
+        !block.level ||
+        block.level < 1 ||
+        block.level > 3
+      ) {
+        return;
+      }
+
+      const baseId =
+        this.normalizeOptionalString(block.id) ??
+        this.slugifyHeadingText(block.text) ??
+        `heading-${index + 1}`;
+      const uniqueId = this.ensureUniqueTocId(baseId, usedIds);
+
+      toc.push({
+        id: uniqueId,
+        text: block.text,
+        level: block.level as 1 | 2 | 3,
+      });
+    });
+
+    return toc;
+  }
+
+  private ensureUniqueTocId(baseId: string, usedIds: Set<string>): string {
+    if (!usedIds.has(baseId)) {
+      usedIds.add(baseId);
+      return baseId;
+    }
+
+    let suffix = 2;
+    while (usedIds.has(`${baseId}-${suffix}`)) {
+      suffix += 1;
+    }
+
+    const nextId = `${baseId}-${suffix}`;
+    usedIds.add(nextId);
+    return nextId;
+  }
+
+  private slugifyHeadingText(text: string): string | undefined {
+    const slug = text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-');
+    return slug || undefined;
+  }
+
+  private resolveExcerpt(
+    excerpt: string | undefined,
+    blocks: NormalizedPostBlock[],
+  ): string {
+    const normalizedExcerpt = this.normalizeOptionalString(excerpt);
+    if (normalizedExcerpt) {
+      return normalizedExcerpt;
+    }
+
+    const blockText = this.extractTextFromBlocks(blocks, 320);
+    return blockText || 'No preview available.';
+  }
+
+  private calculateReadTimeMinutes(
+    blocks: NormalizedPostBlock[],
+    excerpt?: string,
+  ): number {
+    const text = [this.normalizeOptionalString(excerpt) ?? '', this.extractTextFromBlocks(blocks, 5000)]
+      .join(' ')
+      .trim();
+    if (!text) {
+      return 1;
+    }
+
+    const words = text.split(/\s+/).filter(Boolean).length;
+    return Math.max(1, Math.ceil(words / 220));
+  }
+
+  private extractTextFromBlocks(
+    blocks: NormalizedPostBlock[],
+    maxLength: number,
+  ): string {
+    const chunks: string[] = [];
+
+    blocks.forEach((block) => {
+      switch (block.type) {
+        case PostBlockType.PARAGRAPH:
+        case PostBlockType.HEADING:
+        case PostBlockType.QUOTE:
+        case PostBlockType.CALLOUT:
+          if (block.text) {
+            chunks.push(block.text);
+          }
+          break;
+        case PostBlockType.LIST:
+          if (block.items?.length) {
+            chunks.push(...block.items);
+          }
+          break;
+        case PostBlockType.IMAGE:
+          if (block.alt) {
+            chunks.push(block.alt);
+          }
+          if (block.caption) {
+            chunks.push(block.caption);
+          }
+          break;
+        case PostBlockType.CODE:
+          if (block.code) {
+            chunks.push(block.code.slice(0, 500));
+          }
+          break;
+        case PostBlockType.TODO:
+          if (block.todoItems?.length) {
+            chunks.push(...block.todoItems.map((item) => item.text));
+          }
+          break;
+        case PostBlockType.EMBED:
+          if (block.embedUrl) {
+            chunks.push(block.embedUrl);
+          }
+          break;
+        default:
+          break;
+      }
+    });
+
+    const combined = chunks.join(' ').replace(/\s+/g, ' ').trim();
+    if (combined.length <= maxLength) {
+      return combined;
+    }
+    return combined.slice(0, Math.max(maxLength - 3, 1)).trimEnd() + '...';
+  }
+
+  private toIsoString(value?: Date): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    try {
+      return new Date(value).toISOString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async isViewerVipActive(viewerUserId?: string): Promise<boolean> {
+    if (!viewerUserId) {
+      return false;
+    }
+
+    const user = await this.userModel
+      .findById(viewerUserId)
+      .select('subscription')
+      .lean();
+    if (!user?.subscription) {
+      return false;
+    }
+
+    return (
+      user.subscription.status === SubscriptionStatus.ACTIVE &&
+      user.subscription.planCode === SubscriptionPlanCode.VIP
+    );
+  }
+
   private async enrichPostsWithAuthor(
     posts: PostDocument[],
   ): Promise<PostDocument[]> {
@@ -987,7 +1455,7 @@ export class PostsService {
     ];
     const authors = await this.userModel
       .find({ _id: { $in: authorIds } })
-      .select('fullName avatarUrl')
+      .select('fullName avatarUrl gamification.level')
       .lean();
 
     const authorMap = new Map<string, PostAuthor>(
@@ -997,6 +1465,10 @@ export class PostsService {
           id: author._id.toString(),
           fullName: author.fullName,
           avatarUrl: author.avatarUrl,
+          level:
+            typeof author.gamification?.level === 'number'
+              ? author.gamification.level
+              : 1,
         },
       ]),
     );
@@ -1015,6 +1487,7 @@ export class PostsService {
         author: author ?? {
           id: authorId,
           fullName: '[Unknown author]',
+          level: 1,
         },
       } as unknown as PostDocument;
     });
@@ -1113,6 +1586,36 @@ export class PostsService {
           language: this.normalizeOptionalString(block.language),
         };
       }
+      case PostBlockType.DIVIDER: {
+        return {
+          id,
+          type: PostBlockType.DIVIDER,
+        };
+      }
+      case PostBlockType.EMBED: {
+        return {
+          id,
+          type: PostBlockType.EMBED,
+          provider: this.normalizeEmbedProvider(block.provider, index),
+          embedUrl: this.normalizeRequiredString(block.embedUrl, 'embedUrl', index),
+        };
+      }
+      case PostBlockType.CALLOUT: {
+        return {
+          id,
+          type: PostBlockType.CALLOUT,
+          text: this.normalizeRequiredString(block.text, 'text', index),
+          tone: this.normalizeCalloutTone(block.tone),
+        };
+      }
+      case PostBlockType.TODO: {
+        const todoItems = this.normalizeTodoItems(block.todoItems, index);
+        return {
+          id,
+          type: PostBlockType.TODO,
+          todoItems,
+        };
+      }
       default:
         throw new BadRequestException(
           `Unsupported block type at index ${index}`,
@@ -1136,6 +1639,7 @@ export class PostsService {
         case PostBlockType.PARAGRAPH:
         case PostBlockType.HEADING:
         case PostBlockType.QUOTE:
+        case PostBlockType.CALLOUT:
           if (block.text) {
             tokens.push(block.text);
           }
@@ -1156,6 +1660,16 @@ export class PostsService {
         case PostBlockType.CODE:
           if (block.code) {
             tokens.push(block.code.slice(0, 500));
+          }
+          break;
+        case PostBlockType.EMBED:
+          if (block.embedUrl) {
+            tokens.push(block.embedUrl);
+          }
+          break;
+        case PostBlockType.TODO:
+          if (block.todoItems?.length) {
+            tokens.push(...block.todoItems.map((item) => item.text));
           }
           break;
         default:
@@ -1219,6 +1733,57 @@ export class PostsService {
     }
 
     return PostImageSize.MEDIUM;
+  }
+
+  private normalizeEmbedProvider(
+    provider: PostEmbedProvider | undefined,
+    index: number,
+  ): PostEmbedProvider {
+    if (
+      provider === PostEmbedProvider.YOUTUBE ||
+      provider === PostEmbedProvider.TWITTER
+    ) {
+      return provider;
+    }
+
+    throw new BadRequestException(
+      `Block at index ${index} requires a valid embed provider`,
+    );
+  }
+
+  private normalizeCalloutTone(
+    tone: PostCalloutTone | undefined,
+  ): PostCalloutTone {
+    if (
+      tone === PostCalloutTone.INFO ||
+      tone === PostCalloutTone.SUCCESS ||
+      tone === PostCalloutTone.WARNING ||
+      tone === PostCalloutTone.DANGER
+    ) {
+      return tone;
+    }
+
+    return PostCalloutTone.INFO;
+  }
+
+  private normalizeTodoItems(
+    rawTodoItems: Array<{ text?: string; checked?: boolean }> | undefined,
+    index: number,
+  ): Array<{ text: string; checked: boolean }> {
+    const todoItems = (rawTodoItems ?? [])
+      .map((item) => ({
+        text: this.normalizeOptionalString(item?.text),
+        checked: item?.checked === true,
+      }))
+      .filter((item): item is { text: string; checked: boolean } => !!item.text);
+
+    if (todoItems.length === 0) {
+      throw new BadRequestException(
+        `Block at index ${index} must have at least one todo item`,
+      );
+    }
+
+    return todoItems;
   }
 
   private async validateReferences(

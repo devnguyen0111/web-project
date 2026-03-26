@@ -10,6 +10,8 @@ import { ConfigService } from '@nestjs/config';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { OpsAlertService } from '../alerts/ops-alert.service';
 import { MongoTransactionService } from '../common/services/mongo-transaction.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/schemas/notification.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateDepositDto } from './dto/create-deposit.dto';
 import {
@@ -46,6 +48,7 @@ export class DepositService {
     private readonly paymentProviderManager: PaymentProviderManager,
     private readonly mongoTransactionService: MongoTransactionService,
     @Optional() private readonly opsAlertService?: OpsAlertService,
+    @Optional() private readonly notificationsService?: NotificationsService,
   ) {}
 
   async getDepositRequest(
@@ -75,7 +78,8 @@ export class DepositService {
     transactionId: string,
     reason?: string,
   ): Promise<TransactionDocument> {
-    return this.executeInTransaction(async (session) => {
+    let statusChanged = false;
+    const transaction = await this.executeInTransaction(async (session) => {
       const transaction = await this.transactionModel
         .findById(transactionId)
         .session(session)
@@ -113,6 +117,7 @@ export class DepositService {
 
       transaction.status = TransactionStatus.FAILED;
       transaction.failedAt = new Date();
+      statusChanged = true;
       transaction.failureReason =
         reason || cancelResult.message || 'Payment cancelled by user';
       transaction.metadata = {
@@ -123,6 +128,22 @@ export class DepositService {
       await transaction.save({ session });
       return transaction;
     });
+
+    if (statusChanged) {
+      await this.safeNotifyWallet(
+        transaction.userId.toString(),
+        NotificationType.WALLET_DEPOSIT_CANCELLED,
+        'Deposit request cancelled',
+        transaction.failureReason || 'Your deposit request was cancelled.',
+        {
+          transactionId: transaction.id,
+          amount: transaction.amount,
+          provider: transaction.externalPayment?.provider,
+        },
+      );
+    }
+
+    return transaction;
   }
 
   async createDepositRequest(
@@ -288,7 +309,8 @@ export class DepositService {
   async markDepositCompleted(
     callback: PaymentCallbackResult,
   ): Promise<TransactionDocument> {
-    return this.executeInTransaction(async (session) => {
+    let statusChanged = false;
+    const transaction = await this.executeInTransaction(async (session) => {
       const transaction = await this.findDepositTransactionByExternalId(
         callback.provider,
         callback.externalId,
@@ -321,6 +343,7 @@ export class DepositService {
       transaction.balanceBefore = wallet.balance;
       transaction.balanceAfter = updatedBalance;
       transaction.status = TransactionStatus.COMPLETED;
+      statusChanged = true;
       transaction.completedAt = new Date();
       transaction.failedAt = undefined;
       transaction.failureReason = undefined;
@@ -348,12 +371,30 @@ export class DepositService {
       ]);
       return transaction;
     });
+
+    if (statusChanged) {
+      await this.safeNotifyWallet(
+        transaction.userId.toString(),
+        NotificationType.WALLET_DEPOSIT_COMPLETED,
+        'Deposit completed',
+        'Your wallet deposit was completed successfully.',
+        {
+          transactionId: transaction.id,
+          amount: transaction.amount,
+          balanceAfter: transaction.balanceAfter,
+          provider: transaction.externalPayment?.provider,
+        },
+      );
+    }
+
+    return transaction;
   }
 
   async markDepositFailed(
     callback: PaymentCallbackResult,
   ): Promise<TransactionDocument> {
-    return this.executeInTransaction(async (session) => {
+    let statusChanged = false;
+    const transaction = await this.executeInTransaction(async (session) => {
       const transaction = await this.findDepositTransactionByExternalId(
         callback.provider,
         callback.externalId,
@@ -369,6 +410,7 @@ export class DepositService {
       }
 
       transaction.status = TransactionStatus.FAILED;
+      statusChanged = true;
       transaction.failedAt = new Date();
       transaction.failureReason =
         callback.message || callback.transactionStatusCode || 'Payment failed';
@@ -392,6 +434,23 @@ export class DepositService {
       await transaction.save({ session });
       return transaction;
     });
+
+    if (statusChanged) {
+      await this.safeNotifyWallet(
+        transaction.userId.toString(),
+        NotificationType.WALLET_DEPOSIT_FAILED,
+        'Deposit failed',
+        transaction.failureReason ||
+          'Your wallet deposit could not be completed.',
+        {
+          transactionId: transaction.id,
+          amount: transaction.amount,
+          provider: transaction.externalPayment?.provider,
+        },
+      );
+    }
+
+    return transaction;
   }
 
   async markDepositPending(
@@ -486,6 +545,28 @@ export class DepositService {
       });
       throw error;
     }
+  }
+
+  private async safeNotifyWallet(
+    userId: string,
+    type: NotificationType,
+    title: string,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.notificationsService || !Types.ObjectId.isValid(userId)) {
+      return;
+    }
+
+    await this.notificationsService
+      .createWalletNotification({
+        userId,
+        type,
+        title,
+        message,
+        metadata,
+      })
+      .catch(() => undefined);
   }
 
   private executeInTransaction<T>(

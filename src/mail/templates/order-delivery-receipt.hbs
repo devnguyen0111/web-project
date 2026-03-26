@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+    <h2 style="margin: 0 0 12px;">Your order is ready for download</h2>
+    <p style="margin: 0 0 16px;">
+      {{#if buyerName}}Hi {{buyerName}},{{else}}Hi,{{/if}} your order has been delivered.
+    </p>
+
+    <table style="border-collapse: collapse; width: 100%; margin-bottom: 16px;">
+      <tbody>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Order Number</td>
+          <td style="padding: 6px 0;">{{orderNumber}}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Status</td>
+          <td style="padding: 6px 0;">{{orderStatus}}</td>
+        </tr>
+        {{#if paidAt}}
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Paid At</td>
+          <td style="padding: 6px 0;">{{paidAt}}</td>
+        </tr>
+        {{/if}}
+        {{#if deliveredAt}}
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Delivered At</td>
+          <td style="padding: 6px 0;">{{deliveredAt}}</td>
+        </tr>
+        {{/if}}
+        {{#if transactionId}}
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Transaction</td>
+          <td style="padding: 6px 0;">{{transactionId}}</td>
+        </tr>
+        {{/if}}
+      </tbody>
+    </table>
+
+    <h3 style="margin: 0 0 8px;">Receipt</h3>
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+      <thead>
+        <tr>
+          <th align="left" style="padding: 8px; border-bottom: 1px solid #d1d5db;">Item</th>
+          <th align="right" style="padding: 8px; border-bottom: 1px solid #d1d5db;">Qty</th>
+          <th align="right" style="padding: 8px; border-bottom: 1px solid #d1d5db;">Unit</th>
+          <th align="right" style="padding: 8px; border-bottom: 1px solid #d1d5db;">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each items}}
+        <tr>
+          <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{{this.name}}</td>
+          <td align="right" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{{this.quantity}}</td>
+          <td align="right" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{{this.unitPrice}}</td>
+          <td align="right" style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{{this.lineTotal}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+      <tbody>
+        <tr>
+          <td style="padding: 4px 0; font-weight: 600;">Subtotal</td>
+          <td align="right" style="padding: 4px 0;">{{subtotal}}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; font-weight: 600;">Discount</td>
+          <td align="right" style="padding: 4px 0;">{{discountTotal}}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; font-weight: 700;">Total</td>
+          <td align="right" style="padding: 4px 0; font-weight: 700;">{{total}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p style="margin: 0 0 8px;">
+      <a href="{{downloadUrl}}" style="display: inline-block; padding: 10px 16px; background: #111827; color: #ffffff; text-decoration: none; border-radius: 4px;">
+        Download File
+      </a>
+    </p>
+    <p style="margin: 0 0 8px; color: #374151;">
+      Download link expires at: <strong>{{downloadExpiresAt}}</strong>
+    </p>
+    {{#if note}}
+    <p style="margin: 0 0 8px; color: #374151;">Note: {{note}}</p>
+    {{/if}}
+    {{#if supportEmail}}
+    <p style="margin: 0; color: #374151;">
+      Need help? Contact: <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>
+    </p>
+    {{/if}}
+  </body>
+</html>

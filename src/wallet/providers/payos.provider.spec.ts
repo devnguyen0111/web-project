@@ -85,7 +85,8 @@ describe('PayosProvider', () => {
       code: '00',
       currency: 'VND',
     };
-    const signaturePayload = 'amount=120000&code=00&currency=VND&orderCode=99887766&status=PAID';
+    const signaturePayload =
+      'amount=120000&code=00&currency=VND&orderCode=99887766&status=PAID';
     const signature = hmacSha256('checksum-key', signaturePayload);
 
     const result = provider.verifyCallback(

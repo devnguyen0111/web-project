@@ -18,6 +18,10 @@ export enum PostBlockType {
   LIST = 'list',
   IMAGE = 'image',
   CODE = 'code',
+  DIVIDER = 'divider',
+  EMBED = 'embed',
+  CALLOUT = 'callout',
+  TODO = 'todo',
 }
 
 export enum PostListStyle {
@@ -30,6 +34,29 @@ export enum PostImageSize {
   MEDIUM = 'medium',
   LARGE = 'large',
 }
+
+export enum PostEmbedProvider {
+  YOUTUBE = 'youtube',
+  TWITTER = 'twitter',
+}
+
+export enum PostCalloutTone {
+  INFO = 'info',
+  SUCCESS = 'success',
+  WARNING = 'warning',
+  DANGER = 'danger',
+}
+
+@Schema({ _id: false })
+export class PostTodoItem {
+  @Prop({ required: true, trim: true })
+  text: string;
+
+  @Prop({ default: false })
+  checked: boolean;
+}
+
+export const PostTodoItemSchema = SchemaFactory.createForClass(PostTodoItem);
 
 @Schema({ _id: false })
 export class PostBlock {
@@ -68,6 +95,18 @@ export class PostBlock {
 
   @Prop({ trim: true })
   language?: string;
+
+  @Prop({ enum: PostEmbedProvider })
+  provider?: PostEmbedProvider;
+
+  @Prop({ trim: true })
+  embedUrl?: string;
+
+  @Prop({ enum: PostCalloutTone })
+  tone?: PostCalloutTone;
+
+  @Prop({ type: [PostTodoItemSchema], default: undefined })
+  todoItems?: PostTodoItem[];
 }
 
 export const PostBlockSchema = SchemaFactory.createForClass(PostBlock);
@@ -119,6 +158,15 @@ export class Post {
 
   @Prop({ trim: true })
   coverImageUrl?: string;
+
+  @Prop({ default: false })
+  isExclusive: boolean;
+
+  @Prop({ default: false })
+  isFeatured: boolean;
+
+  @Prop({ default: false })
+  isPinned: boolean;
 
   @Prop({ type: [PostBlockSchema], default: [] })
   blocks: PostBlock[];
@@ -182,6 +230,7 @@ export const PostSchema = SchemaFactory.createForClass(Post);
 
 PostSchema.index({ authorId: 1, status: 1 });
 PostSchema.index({ status: 1, publishedAt: -1 });
+PostSchema.index({ status: 1, isPinned: -1, isFeatured: -1, publishedAt: -1 });
 PostSchema.index({ categoryId: 1, status: 1 });
 PostSchema.index({ tags: 1 });
 PostSchema.index({ title: 'text', searchText: 'text' });

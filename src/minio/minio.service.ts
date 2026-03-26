@@ -83,6 +83,70 @@ export class MinioService implements OnModuleInit {
     await this.minioClient.removeObject(bucketName, objectName);
   }
 
+  async createPresignedGetUrl(
+    bucketName: string,
+    objectName: string,
+    expirySeconds = 3600,
+  ): Promise<string> {
+    return this.minioClient.presignedGetObject(
+      bucketName,
+      objectName,
+      Math.max(1, Math.floor(expirySeconds)),
+    );
+  }
+
+  async createPresignedDownloadUrl(
+    bucketName: string,
+    objectName: string,
+    options?: {
+      expirySeconds?: number;
+      fileName?: string;
+      contentType?: string;
+    },
+  ): Promise<string> {
+    const expirySeconds = Math.max(
+      1,
+      Math.floor(options?.expirySeconds ?? 3600),
+    );
+    const responseHeaders: Record<string, string> = {};
+    const fileName = options?.fileName?.trim();
+    if (fileName) {
+      const sanitized = this.sanitizeFileName(fileName);
+      responseHeaders['response-content-disposition'] =
+        `attachment; filename="${sanitized}"; filename*=UTF-8''${encodeURIComponent(sanitized)}`;
+    }
+
+    const contentType = options?.contentType?.trim();
+    if (contentType) {
+      responseHeaders['response-content-type'] = contentType;
+    }
+
+    return this.minioClient.presignedGetObject(
+      bucketName,
+      objectName,
+      expirySeconds,
+      Object.keys(responseHeaders).length ? responseHeaders : undefined,
+    );
+  }
+
+  async objectExists(bucketName: string, objectName: string): Promise<boolean> {
+    try {
+      await this.minioClient.statObject(bucketName, objectName);
+      return true;
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code ?? '')
+          : '';
+      if (
+        ['NotFound', 'NoSuchKey', 'NoSuchObject', 'NoSuchBucket'].includes(code)
+      ) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async removeObjectByUrl(bucketName: string, fileUrl: string): Promise<void> {
     const objectName = this.extractObjectNameFromUrl(bucketName, fileUrl);
     if (!objectName) {
@@ -160,6 +224,11 @@ export class MinioService implements OnModuleInit {
 
   private getConfiguredBuckets(): string[] {
     return [...new Set(Object.values(this.getBucketsMap()).filter(Boolean))];
+  }
+
+  private sanitizeFileName(input: string): string {
+    const sanitized = input.replace(/[\r\n"]/g, '').trim();
+    return sanitized || 'download.bin';
   }
 
   private extractObjectNameFromUrl(

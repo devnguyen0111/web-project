@@ -54,7 +54,6 @@ async function run(): Promise<void> {
     let noChange = 0;
     const ops: AnyDoc[] = [];
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const user = await cursor.next();
       if (!user) {

@@ -171,7 +171,9 @@ function buildMigrationCandidate(
     return null;
   }
 
-  const correctedAmount = ensureSafeIntegerAmount(originalAmount * coinToVndRate);
+  const correctedAmount = ensureSafeIntegerAmount(
+    originalAmount * coinToVndRate,
+  );
   const difference = correctedAmount - originalAmount;
 
   if (difference <= 0) {
@@ -239,7 +241,10 @@ async function assertNoNegativeProjectedBalance(
       'balance' in user.wallet
         ? Number((user.wallet as { balance?: unknown }).balance ?? 0)
         : 0;
-    balanceMap.set(user._id.toString(), Number.isFinite(rawBalance) ? rawBalance : 0);
+    balanceMap.set(
+      user._id.toString(),
+      Number.isFinite(rawBalance) ? rawBalance : 0,
+    );
   }
 
   const negativeUsers: Array<{

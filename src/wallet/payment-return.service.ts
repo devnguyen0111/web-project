@@ -182,7 +182,7 @@ export class PaymentReturnService {
     const resolvedUserId =
       typeof userIdOrPayload === 'string' ? userIdOrPayload : undefined;
     const resolvedPayload =
-      typeof userIdOrPayload === 'string' ? payload ?? {} : userIdOrPayload;
+      typeof userIdOrPayload === 'string' ? (payload ?? {}) : userIdOrPayload;
     const orderCode = this.normalizeOrderCode(resolvedPayload.orderCode);
     const paymentLinkId = this.normalizeOrderCode(
       resolvedPayload.paymentLinkId ?? resolvedPayload.id,
@@ -191,7 +191,10 @@ export class PaymentReturnService {
       .toString()
       .trim()
       .toUpperCase();
-    const codeHint = (resolvedPayload.code ?? '').toString().trim().toUpperCase();
+    const codeHint = (resolvedPayload.code ?? '')
+      .toString()
+      .trim()
+      .toUpperCase();
     const cancelHint =
       this.parseBooleanFlag(resolvedPayload.cancel) ||
       ['CANCELLED', 'CANCELED'].includes(statusHint);
@@ -340,7 +343,9 @@ export class PaymentReturnService {
             ? payloadOrSignature
             : {},
         signature:
-          typeof payloadOrSignature === 'string' ? payloadOrSignature : signature,
+          typeof payloadOrSignature === 'string'
+            ? payloadOrSignature
+            : signature,
       };
     }
 

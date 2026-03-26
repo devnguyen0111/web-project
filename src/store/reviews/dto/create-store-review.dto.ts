@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, MaxLength, Min, Max } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+  Max,
+} from 'class-validator';
 
 export class CreateStoreReviewDto {
   @ApiProperty({ example: 5 })

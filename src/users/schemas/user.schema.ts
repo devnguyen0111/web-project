@@ -14,6 +14,47 @@ import {
 
 export type UserDocument = HydratedDocument<User>;
 
+@Schema({ _id: false })
+export class UserTwoFactor {
+  @Prop({ default: false })
+  enabled: boolean;
+
+  @Prop({ select: false })
+  secretEncrypted?: string;
+
+  @Prop({ type: [String], default: [], select: false })
+  backupCodeHashes: string[];
+
+  @Prop({ type: Date })
+  enabledAt?: Date;
+
+  @Prop({ type: Date })
+  lastVerifiedAt?: Date;
+}
+
+export const UserTwoFactorSchema = SchemaFactory.createForClass(UserTwoFactor);
+
+@Schema({ _id: false })
+export class UserGamification {
+  @Prop({ default: 0 })
+  xp: number;
+
+  @Prop({ default: 1 })
+  level: number;
+
+  @Prop({ default: 100 })
+  xpToNextLevel: number;
+
+  @Prop({ default: 0 })
+  postsPublished: number;
+
+  @Prop({ default: 0 })
+  salesCount: number;
+}
+
+export const UserGamificationSchema =
+  SchemaFactory.createForClass(UserGamification);
+
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true, trim: true })
@@ -21,6 +62,15 @@ export class User {
 
   @Prop({ required: true, unique: true, lowercase: true, trim: true })
   email: string;
+
+  @Prop({
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true,
+    maxlength: 60,
+  })
+  username: string;
 
   @Prop({ required: true, minlength: 6, select: false })
   password: string;
@@ -37,6 +87,15 @@ export class User {
   })
   subscription: Subscription;
 
+  @Prop({
+    type: UserTwoFactorSchema,
+    default: () => ({
+      enabled: false,
+      backupCodeHashes: [],
+    }),
+  })
+  twoFactor: UserTwoFactor;
+
   @Prop({ default: false })
   isEmailVerified: boolean;
 
@@ -45,6 +104,24 @@ export class User {
 
   @Prop()
   avatarUrl?: string;
+
+  @Prop({ default: 0 })
+  followersCount: number;
+
+  @Prop({ default: 0 })
+  followingCount: number;
+
+  @Prop({
+    type: UserGamificationSchema,
+    default: () => ({
+      xp: 0,
+      level: 1,
+      xpToNextLevel: 100,
+      postsPublished: 0,
+      salesCount: 0,
+    }),
+  })
+  gamification: UserGamification;
 
   @Prop({ select: false })
   refreshToken?: string;

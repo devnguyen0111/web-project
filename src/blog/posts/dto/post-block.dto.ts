@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -11,12 +13,27 @@ import {
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import {
   PostBlockType,
+  PostCalloutTone,
+  PostEmbedProvider,
   PostImageSize,
   PostListStyle,
 } from '../schemas/post.schema';
+
+class PostTodoItemDto {
+  @ApiProperty({ example: 'Draft release notes' })
+  @IsString()
+  @MaxLength(500)
+  text: string;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  checked?: boolean;
+}
 
 export class PostBlockDto {
   @ApiPropertyOptional({
@@ -40,7 +57,8 @@ export class PostBlockDto {
     (value: PostBlockDto) =>
       value.type === PostBlockType.PARAGRAPH ||
       value.type === PostBlockType.HEADING ||
-      value.type === PostBlockType.QUOTE,
+      value.type === PostBlockType.QUOTE ||
+      value.type === PostBlockType.CALLOUT,
   )
   @IsString()
   @MaxLength(10000)
@@ -135,4 +153,44 @@ export class PostBlockDto {
   @IsString()
   @MaxLength(80)
   language?: string;
+
+  @ApiPropertyOptional({
+    enum: PostEmbedProvider,
+    example: PostEmbedProvider.YOUTUBE,
+    description: 'Embed provider, only for embed blocks',
+  })
+  @ValidateIf((value: PostBlockDto) => value.type === PostBlockType.EMBED)
+  @IsEnum(PostEmbedProvider)
+  provider?: PostEmbedProvider;
+
+  @ApiPropertyOptional({
+    example: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    description: 'Embed URL, only for embed blocks',
+  })
+  @ValidateIf((value: PostBlockDto) => value.type === PostBlockType.EMBED)
+  @IsString()
+  @MaxLength(2000)
+  embedUrl?: string;
+
+  @ApiPropertyOptional({
+    enum: PostCalloutTone,
+    example: PostCalloutTone.INFO,
+    description: 'Tone for callout block',
+  })
+  @ValidateIf((value: PostBlockDto) => value.type === PostBlockType.CALLOUT)
+  @IsOptional()
+  @IsEnum(PostCalloutTone)
+  tone?: PostCalloutTone;
+
+  @ApiPropertyOptional({
+    type: [PostTodoItemDto],
+    description: 'Todo items, only for todo blocks',
+  })
+  @ValidateIf((value: PostBlockDto) => value.type === PostBlockType.TODO)
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => PostTodoItemDto)
+  todoItems?: PostTodoItemDto[];
 }

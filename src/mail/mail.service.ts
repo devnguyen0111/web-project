@@ -12,12 +12,46 @@ interface SendMailPayload {
   html: string;
 }
 
-type MailTemplateName = 'email-verification' | 'password-reset';
-
-interface MailTemplateContext {
+interface AuthCodeMailTemplateContext {
   code: string;
   expiresInMinutes: number;
 }
+
+interface OrderReceiptMailItem {
+  name: string;
+  quantity: number;
+  unitPrice: string;
+  lineTotal: string;
+}
+
+interface OrderDeliveryReceiptMailContext {
+  buyerName?: string;
+  orderNumber: string;
+  orderStatus: string;
+  paidAt?: string;
+  deliveredAt?: string;
+  subtotal: string;
+  discountTotal: string;
+  total: string;
+  currency: string;
+  transactionId?: string;
+  downloadUrl: string;
+  downloadExpiresAt: string;
+  supportEmail?: string;
+  note?: string;
+  items: OrderReceiptMailItem[];
+}
+
+type MailTemplateName =
+  | 'email-verification'
+  | 'password-reset'
+  | 'order-delivery-receipt';
+
+type MailTemplateContextMap = {
+  'email-verification': AuthCodeMailTemplateContext;
+  'password-reset': AuthCodeMailTemplateContext;
+  'order-delivery-receipt': OrderDeliveryReceiptMailContext;
+};
 
 @Injectable()
 export class MailService {
@@ -26,7 +60,7 @@ export class MailService {
   private readonly from: string;
   private readonly templateCache = new Map<
     MailTemplateName,
-    Handlebars.TemplateDelegate<MailTemplateContext>
+    Handlebars.TemplateDelegate<unknown>
   >();
 
   constructor(private readonly configService: ConfigService) {
@@ -83,6 +117,82 @@ export class MailService {
     });
 
     await this.sendMail({ to, subject, text, html });
+  }
+
+  async sendOrderDeliveryReceipt(
+    to: string,
+    payload: {
+      buyerName?: string;
+      orderNumber: string;
+      orderStatus: string;
+      paidAt?: Date;
+      deliveredAt?: Date;
+      subtotal: number;
+      discountTotal: number;
+      total: number;
+      currency: string;
+      transactionId?: string;
+      downloadUrl: string;
+      downloadExpiresAt: Date;
+      supportEmail?: string;
+      note?: string;
+      items: Array<{
+        name: string;
+        quantity: number;
+        unitPrice: number;
+        lineTotal: number;
+      }>;
+    },
+  ): Promise<void> {
+    const subject = `Order ${payload.orderNumber} is ready for download`;
+    const context: OrderDeliveryReceiptMailContext = {
+      buyerName: payload.buyerName,
+      orderNumber: payload.orderNumber,
+      orderStatus: payload.orderStatus,
+      paidAt: payload.paidAt?.toISOString(),
+      deliveredAt: payload.deliveredAt?.toISOString(),
+      subtotal: this.formatCurrency(payload.subtotal, payload.currency),
+      discountTotal: this.formatCurrency(
+        payload.discountTotal,
+        payload.currency,
+      ),
+      total: this.formatCurrency(payload.total, payload.currency),
+      currency: payload.currency,
+      transactionId: payload.transactionId,
+      downloadUrl: payload.downloadUrl,
+      downloadExpiresAt: payload.downloadExpiresAt.toISOString(),
+      supportEmail: payload.supportEmail,
+      note: payload.note,
+      items: payload.items.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: this.formatCurrency(item.unitPrice, payload.currency),
+        lineTotal: this.formatCurrency(item.lineTotal, payload.currency),
+      })),
+    };
+
+    const textLines = [
+      `Order ${payload.orderNumber} has been delivered.`,
+      `Status: ${payload.orderStatus}`,
+      `Download link: ${payload.downloadUrl}`,
+      `Link expires at: ${payload.downloadExpiresAt.toISOString()}`,
+      `Total: ${this.formatCurrency(payload.total, payload.currency)}`,
+    ];
+
+    if (payload.transactionId) {
+      textLines.push(`Transaction: ${payload.transactionId}`);
+    }
+    if (payload.note) {
+      textLines.push(`Note: ${payload.note}`);
+    }
+
+    const html = this.renderTemplate('order-delivery-receipt', context);
+    await this.sendMail({
+      to,
+      subject,
+      text: textLines.join('\n'),
+      html,
+    });
   }
 
   async sendSubscriptionReminder(
@@ -154,8 +264,7 @@ export class MailService {
     },
   ): Promise<void> {
     const subject = `Subscription expired: ${payload.previousPlanName}`;
-    const text =
-      `Your ${payload.previousPlanName} subscription expired on ${payload.expiredAt.toISOString()} and is now downgraded to Free.`;
+    const text = `Your ${payload.previousPlanName} subscription expired on ${payload.expiredAt.toISOString()} and is now downgraded to Free.`;
     const html = `
       <p>Your <strong>${payload.previousPlanName}</strong> subscription expired on <strong>${payload.expiredAt.toISOString()}</strong>.</p>
       <p>Your account is now on the <strong>Free</strong> plan.</p>
@@ -174,8 +283,7 @@ export class MailService {
     const subject = `[ALERT] ${payload.title}`;
     const createdAt = payload.createdAt ?? new Date();
     const text =
-      `${payload.message}\n` +
-      `Created at: ${createdAt.toISOString()}`;
+      `${payload.message}\n` + `Created at: ${createdAt.toISOString()}`;
     const html = `
       <p><strong>${payload.title}</strong></p>
       <p>${payload.message}</p>
@@ -185,21 +293,32 @@ export class MailService {
     await this.sendMail({ to, subject, text, html });
   }
 
-  private renderTemplate(
-    templateName: MailTemplateName,
-    context: MailTemplateContext,
+  private renderTemplate<TName extends MailTemplateName>(
+    templateName: TName,
+    context: MailTemplateContextMap[TName],
   ): string {
-    const cachedTemplate = this.templateCache.get(templateName);
+    const cachedTemplate = this.templateCache.get(templateName) as
+      | Handlebars.TemplateDelegate<MailTemplateContextMap[TName]>
+      | undefined;
     if (cachedTemplate) {
       return cachedTemplate(context);
     }
 
     const templatePath = join(__dirname, 'templates', `${templateName}.hbs`);
     const templateSource = readFileSync(templatePath, 'utf8');
-    const template = Handlebars.compile<MailTemplateContext>(templateSource);
-    this.templateCache.set(templateName, template);
+    const template =
+      Handlebars.compile<MailTemplateContextMap[TName]>(templateSource);
+    this.templateCache.set(
+      templateName,
+      template as Handlebars.TemplateDelegate<unknown>,
+    );
 
     return template(context);
+  }
+
+  private formatCurrency(value: number, currency: string): string {
+    const normalized = Number.isFinite(value) ? value : 0;
+    return `${Math.round(normalized).toLocaleString('en-US')} ${currency.toUpperCase()}`;
   }
 
   private async sendMail(payload: SendMailPayload): Promise<void> {

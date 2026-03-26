@@ -10,9 +10,12 @@ import {
   Post as HttpPost,
   Query,
   Req,
+  UnauthorizedException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -35,6 +38,7 @@ import { UpdatePostDto } from './dto/update-post.dto';
 import { VotePollDto } from './dto/vote-poll.dto';
 import { PostsService } from './posts.service';
 import type { Request } from 'express';
+import type { JwtPayload } from '../../auth/strategies/jwt.strategy';
 
 interface AuthUser {
   userId: string;
@@ -44,7 +48,11 @@ interface AuthUser {
 @ApiTags('posts')
 @Controller('posts')
 export class PostsController {
-  constructor(private readonly postsService: PostsService) {}
+  constructor(
+    private readonly postsService: PostsService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Public()
   @Get()
@@ -54,7 +62,7 @@ export class PostsController {
   @ApiQuery({ name: 'tagId', required: false })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
-  listPublished(@Query() query: PostsQueryDto) {
+  listPublished(@Query() query: PostsQueryDto): Promise<unknown> {
     return this.postsService.listPublished(query);
   }
 
@@ -282,8 +290,9 @@ export class PostsController {
     @Query('trackView') trackView?: string,
     @Headers('purpose') purpose?: string,
     @Headers('next-router-prefetch') nextRouterPrefetch?: string,
+    @Headers('authorization') authorization?: string,
     @Req() request?: Request,
-  ) {
+  ): Promise<unknown> {
     const isPrefetchRequest =
       purpose?.toLowerCase() === 'prefetch' || nextRouterPrefetch !== undefined;
 
@@ -295,7 +304,33 @@ export class PostsController {
     return this.postsService.findPublishedBySlug(slug, {
       shouldIncrementView: shouldTrackView,
       viewerFingerprint: this.buildViewerFingerprint(request),
+      viewerUserId: this.extractOptionalViewerUserId(authorization),
     });
+  }
+
+  private extractOptionalViewerUserId(
+    authorizationHeader?: string,
+  ): string | undefined {
+    if (!authorizationHeader) {
+      return undefined;
+    }
+
+    const [scheme, token] = authorizationHeader.split(' ');
+    if (!scheme || !token || scheme.toLowerCase() !== 'bearer') {
+      return undefined;
+    }
+
+    try {
+      const payload = this.jwtService.verify<JwtPayload>(token, {
+        secret: this.configService.getOrThrow<string>('jwt.accessTokenSecret'),
+      });
+      return payload.sub;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        return undefined;
+      }
+      return undefined;
+    }
   }
 
   private buildViewerFingerprint(request?: Request): string | undefined {

@@ -39,7 +39,10 @@ export class CartController {
   @Post('items')
   @ApiOperation({ summary: 'Add item to cart' })
   @ApiBody({ type: AddCartItemDto })
-  addItem(@CurrentUser('userId') userId: string, @Body() payload: AddCartItemDto) {
+  addItem(
+    @CurrentUser('userId') userId: string,
+    @Body() payload: AddCartItemDto,
+  ) {
     return this.cartService.addItem(userId, payload);
   }
 

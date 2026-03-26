@@ -1,14 +1,23 @@
 import {
+  ForbiddenException,
   BadRequestException,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { MongoTransactionService } from '../common/services/mongo-transaction.service';
+import {
+  SubscriptionPlanCode,
+  SubscriptionStatus,
+  getSubscriptionPlanDefinition,
+} from '../subscriptions/subscription.constants';
+import { normalizeSubscription } from '../subscriptions/subscription.util';
 import { OrdersService } from '../store/orders/orders.service';
 import { OrderSource } from '../store/orders/schemas/order.schema';
 import { ProductsService } from '../store/products/products.service';
+import { User } from '../users/schemas/user.schema';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { CheckoutCartDto } from './dto/checkout-cart.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
@@ -25,11 +34,20 @@ type CartItemWithId = {
   currency: string;
 };
 
+type CartPricingContext = {
+  isVipActive: boolean;
+  storeDiscountPercent: number;
+  planCode: SubscriptionPlanCode;
+};
+
 @Injectable()
 export class CartService {
   constructor(
     @InjectModel(Cart.name)
     private readonly cartModel: Model<Cart>,
+    @Optional()
+    @InjectModel(User.name)
+    private readonly userModel: Model<User> | undefined,
     @InjectConnection()
     private readonly connection: Connection,
     private readonly productsService: ProductsService,
@@ -46,10 +64,16 @@ export class CartService {
 
   async addItem(userId: string, payload: AddCartItemDto) {
     return this.executeInTransaction(async (session) => {
+      const pricingContext = await this.getPricingContext(userId, session);
       const product = await this.productsService.findPurchasableByIdOrFail(
         payload.productId,
         session,
       );
+      if (product.vipOnly && !pricingContext.isVipActive) {
+        throw new ForbiddenException(
+          'VIP subscription is required to add this product to cart',
+        );
+      }
       const quantity = Math.floor(payload.quantity);
       if (product.stock !== undefined && quantity > product.stock) {
         throw new BadRequestException(
@@ -86,7 +110,7 @@ export class CartService {
         });
       }
 
-      this.recalculateCartTotals(cart);
+      this.recalculateCartTotals(cart, pricingContext.storeDiscountPercent);
       await cart.save({ session });
       return cart;
     });
@@ -94,6 +118,7 @@ export class CartService {
 
   async updateItem(userId: string, itemId: string, payload: UpdateCartItemDto) {
     return this.executeInTransaction(async (session) => {
+      const pricingContext = await this.getPricingContext(userId, session);
       const cart = await this.findCartOrFail(userId, session);
       const item = (cart.items as unknown as CartItemWithId[]).find(
         (entry) => entry._id.toString() === itemId,
@@ -106,6 +131,11 @@ export class CartService {
         item.productId.toString(),
         session,
       );
+      if (product.vipOnly && !pricingContext.isVipActive) {
+        throw new ForbiddenException(
+          'VIP subscription is required to keep this product in cart',
+        );
+      }
       const quantity = Math.floor(payload.quantity);
       if (product.stock !== undefined && quantity > product.stock) {
         throw new BadRequestException(
@@ -120,7 +150,7 @@ export class CartService {
       item.productSlug = product.slug;
       item.lineTotal = quantity * item.unitPrice;
 
-      this.recalculateCartTotals(cart);
+      this.recalculateCartTotals(cart, pricingContext.storeDiscountPercent);
       await cart.save({ session });
       return cart;
     });
@@ -138,7 +168,8 @@ export class CartService {
         throw new NotFoundException('Cart item not found');
       }
 
-      this.recalculateCartTotals(cart);
+      const pricingContext = await this.getPricingContext(userId, session);
+      this.recalculateCartTotals(cart, pricingContext.storeDiscountPercent);
       await cart.save({ session });
       return cart;
     });
@@ -155,14 +186,35 @@ export class CartService {
       }
 
       cart.items = [];
-      this.recalculateCartTotals(cart);
+      this.recalculateCartTotals(cart, 0);
       await cart.save({ session });
       return cart;
     });
   }
 
   async checkout(userId: string, payload: CheckoutCartDto) {
-    return this.executeInTransaction(async (session) => {
+    const result = await this.executeInTransaction(async (session) => {
+      if (payload.idempotencyKey) {
+        const existingOrder =
+          await this.ordersService.findExistingOrderByIdempotency(
+            userId,
+            payload.idempotencyKey,
+            OrderSource.CART,
+            session,
+          );
+        if (existingOrder) {
+          const existingCart = await this.cartModel
+            .findOne({ userId: new Types.ObjectId(userId) })
+            .session(session)
+            .exec();
+
+          return {
+            order: existingOrder,
+            cart: existingCart ?? this.buildEmptyCart(userId),
+          };
+        }
+      }
+
       const cart = await this.findCartOrFail(userId, session);
       if (cart.items.length === 0) {
         throw new BadRequestException('Cart is empty');
@@ -183,7 +235,7 @@ export class CartService {
       );
 
       cart.items = [];
-      this.recalculateCartTotals(cart);
+      this.recalculateCartTotals(cart, 0);
       await cart.save({ session });
 
       return {
@@ -191,6 +243,9 @@ export class CartService {
         cart,
       };
     });
+
+    await this.ordersService.dispatchDeliveryEmailForOrder(result.order);
+    return result;
   }
 
   private async findOrCreateCart(
@@ -236,11 +291,18 @@ export class CartService {
     return cart;
   }
 
-  private recalculateCartTotals(cart: CartDocument) {
+  private recalculateCartTotals(
+    cart: CartDocument,
+    storeDiscountPercent = 0,
+  ) {
     const subtotal = cart.items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const discountTotal = this.calculateDiscountTotal(
+      subtotal,
+      storeDiscountPercent,
+    );
     cart.subtotal = subtotal;
-    cart.discountTotal = 0;
-    cart.total = subtotal;
+    cart.discountTotal = discountTotal;
+    cart.total = Math.max(0, subtotal - discountTotal);
     cart.currency = cart.items[0]?.currency ?? 'VND';
   }
 
@@ -253,6 +315,62 @@ export class CartService {
       total: 0,
       currency: 'VND',
     };
+  }
+
+  private async getPricingContext(
+    userId: string,
+    session?: ClientSession,
+  ): Promise<CartPricingContext> {
+    const defaultContext: CartPricingContext = {
+      isVipActive: false,
+      storeDiscountPercent: 0,
+      planCode: SubscriptionPlanCode.FREE,
+    };
+
+    if (!this.userModel || !Types.ObjectId.isValid(userId)) {
+      return defaultContext;
+    }
+
+    const query = this.userModel
+      .findById(userId)
+      .select({ subscription: 1 })
+      .lean<{ subscription?: User['subscription'] }>();
+    if (session) {
+      query.session(session);
+    }
+
+    const user = await query.exec();
+    if (!user) {
+      return defaultContext;
+    }
+
+    const subscription = normalizeSubscription(user.subscription);
+    const perks = getSubscriptionPlanDefinition(subscription.planCode).perks;
+
+    return {
+      isVipActive:
+        subscription.status === SubscriptionStatus.ACTIVE &&
+        subscription.planCode === SubscriptionPlanCode.VIP,
+      storeDiscountPercent: Math.max(0, perks.storeDiscountPercent ?? 0),
+      planCode: subscription.planCode,
+    };
+  }
+
+  private calculateDiscountTotal(subtotal: number, discountPercent: number) {
+    if (subtotal <= 0) {
+      return 0;
+    }
+
+    const normalizedDiscountPercent = Math.max(
+      0,
+      Math.min(Math.floor(discountPercent), 100),
+    );
+    if (normalizedDiscountPercent <= 0) {
+      return 0;
+    }
+
+    const rawDiscount = Math.round((subtotal * normalizedDiscountPercent) / 100);
+    return Math.min(rawDiscount, Math.max(0, subtotal - 1));
   }
 
   private executeInTransaction<T>(

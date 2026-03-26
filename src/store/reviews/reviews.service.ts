@@ -7,25 +7,62 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PaginatedResponseDto } from '../../common/dto/paginated-response.dto';
 import { ProductsService } from '../products/products.service';
+import { Order, OrderStatus } from '../orders/schemas/order.schema';
 import { CreateProductReviewDto } from './dto/create-product-review.dto';
 import { CreateStoreReviewDto } from './dto/create-store-review.dto';
 import { ReplyReviewDto } from './dto/reply-review.dto';
 import { ReviewQueryDto } from './dto/review-query.dto';
-import { Review, ReviewDocument, ReviewTargetType } from './schemas/review.schema';
+import {
+  Review,
+  ReviewDocument,
+  ReviewTargetType,
+} from './schemas/review.schema';
+
+type ProductReviewListItem = {
+  _id: Types.ObjectId;
+  reviewerId: Types.ObjectId;
+  targetType: ReviewTargetType;
+  productId?: Types.ObjectId;
+  rating: number;
+  aspects?: {
+    quality?: number;
+    delivery?: number;
+    communication?: number;
+  };
+  content?: string;
+  staffReply?: {
+    message: string;
+    repliedBy: Types.ObjectId;
+    repliedAt: Date;
+  };
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const VERIFIED_PURCHASE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.PAID,
+  OrderStatus.QUOTE_ACCEPTED,
+  OrderStatus.PROCESSING,
+  OrderStatus.DELIVERED,
+  OrderStatus.COMPLETED,
+];
 
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectModel(Review.name)
     private readonly reviewModel: Model<Review>,
+    @InjectModel(Order.name)
+    private readonly orderModel: Model<Order>,
     private readonly productsService: ProductsService,
   ) {}
 
   async listProductReviews(productId: string, query: ReviewQueryDto) {
     const skip = (query.page - 1) * query.limit;
+    const productObjectId = new Types.ObjectId(productId);
     const filter = {
       targetType: ReviewTargetType.PRODUCT,
-      productId: new Types.ObjectId(productId),
+      productId: productObjectId,
     };
     const [items, total] = await Promise.all([
       this.reviewModel
@@ -33,11 +70,27 @@ export class ReviewsService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(query.limit)
+        .lean<ProductReviewListItem[]>()
         .exec(),
       this.reviewModel.countDocuments(filter),
     ]);
 
-    return new PaginatedResponseDto(items, total, query.page, query.limit);
+    const verifiedPurchaseSet = await this.buildProductVerifiedPurchaseSet(
+      productObjectId,
+      items.map((item) => item.reviewerId),
+    );
+
+    const enrichedItems = items.map((item) => ({
+      ...item,
+      verifiedPurchase: verifiedPurchaseSet.has(item.reviewerId.toString()),
+    }));
+
+    return new PaginatedResponseDto(
+      enrichedItems,
+      total,
+      query.page,
+      query.limit,
+    );
   }
 
   async createProductReview(
@@ -47,7 +100,7 @@ export class ReviewsService {
   ) {
     await this.productsService.findPublicDetail(productId);
     try {
-      return await this.reviewModel.create({
+      const created = await this.reviewModel.create({
         targetType: ReviewTargetType.PRODUCT,
         productId: new Types.ObjectId(productId),
         reviewerId: new Types.ObjectId(userId),
@@ -59,6 +112,16 @@ export class ReviewsService {
         },
         content: payload.content?.trim(),
       });
+
+      const verifiedPurchaseSet = await this.buildProductVerifiedPurchaseSet(
+        new Types.ObjectId(productId),
+        [new Types.ObjectId(userId)],
+      );
+
+      return {
+        ...created.toObject(),
+        verifiedPurchase: verifiedPurchaseSet.has(userId),
+      };
     } catch (error) {
       if (this.isDuplicate(error)) {
         throw new ConflictException('You have already reviewed this product');
@@ -118,6 +181,49 @@ export class ReviewsService {
     };
     await review.save();
     return review;
+  }
+
+  private async buildProductVerifiedPurchaseSet(
+    productId: Types.ObjectId,
+    reviewerIds: Types.ObjectId[],
+  ) {
+    const uniqueReviewerIds = Array.from(
+      new Set(
+        reviewerIds
+          .filter((reviewerId) => Types.ObjectId.isValid(reviewerId))
+          .map((reviewerId) => reviewerId.toString()),
+      ),
+    ).map((reviewerId) => new Types.ObjectId(reviewerId));
+
+    if (!uniqueReviewerIds.length) {
+      return new Set<string>();
+    }
+
+    const rows = await this.orderModel
+      .aggregate<{ _id: Types.ObjectId }>([
+        {
+          $match: {
+            buyerId: { $in: uniqueReviewerIds },
+            status: { $in: VERIFIED_PURCHASE_ORDER_STATUSES },
+          },
+        },
+        {
+          $unwind: '$items',
+        },
+        {
+          $match: {
+            'items.productId': productId,
+          },
+        },
+        {
+          $group: {
+            _id: '$buyerId',
+          },
+        },
+      ])
+      .exec();
+
+    return new Set(rows.map((row) => row._id.toString()));
   }
 
   private isDuplicate(error: unknown): boolean {

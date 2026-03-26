@@ -844,4 +844,3 @@ export class SubscriptionsService {
     return Math.round(amountCoins * coinToVndRate);
   }
 }
-

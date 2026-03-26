@@ -1,9 +1,15 @@
-import { Body, Controller, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '../common/constants/roles.constant';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AdminAdjustWalletDto } from './dto/admin-adjust-wallet.dto';
+import { WalletAdminStatsQueryDto } from './dto/wallet-admin-stats-query.dto';
 import { WalletService } from './wallet.service';
 
 @ApiTags('wallet-admin')
@@ -21,5 +27,11 @@ export class WalletAdminController {
     @Body() payload: AdminAdjustWalletDto,
   ) {
     return this.walletService.adminAdjust(actorUserId, payload);
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get wallet admin statistics' })
+  stats(@Query() query: WalletAdminStatsQueryDto) {
+    return this.walletService.getAdminWalletStats(query);
   }
 }
